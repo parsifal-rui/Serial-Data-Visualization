@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Serial Data Visualization</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='common.css') }}">
+</head>
+<body>
+    <div class="sidebar">
+        <ul>
+            <li><a href="#" onclick="showView('motorState')">Motor State Control</a></li>
+            <li><a href="#" onclick="showView('realTimeData')">Real-Time Data</a></li>
+        </ul>
+    </div>
+    
+    <div class="main-content">
+        <!-- Real-Time Data View -->
+        <div id="realTimeData" class="view">
+            <h2>Real-Time Data</h2>
+            <div class="horizontal-container">
+                <div class = "vertical-container">
+                    <h3>Select Motor</h3>
+                    <div id="horizontal-container">
+    
+
+                    <!-- Dropdown for selecting motor IDs being transmitted on the selected serial port -->
+                    <div id="motorSelect">
+                        <label for="motorIDs">Select Motor ID:</label>
+                        <select id="motorIDs">
+                            <option value="M1">Motor 1 (M1)</option>
+                            <option value="M2">Motor 2 (M2)</option>
+                            <!-- Add more options if more motors are available -->
+                        </select>
+                    </div>
+                </div>
+
+                    
+                    <table>
+                        <thead>
+                            <tr>
+                        <th> Time | Voltage (V) | Current (A) | Speed (RPM) </th>
+                            </tr>
+                        </thead>
+                    <tbody id="realTimeTable">
+                    <!-- Data will be dynamically added here -->
+                    </tbody>
+                </table>
+                </div>
+                <div class="vertical-container">
+                    <div class="chart-item">
+                        <h3>Voltage Chart</h3>
+                        <canvas id="voltageChart"></canvas>
+                    </div>
+                    <div class="chart-item">
+                        <h3>Current Chart</h3>
+                        <canvas id="currentChart"></canvas>
+                    </div>
+                    <div class="chart-item">
+                        <h3>Speed Chart</h3>
+                        <canvas id="speedChart"></canvas>
+                    </div>
+                    <div class="chart-item">
+                        <h3>Power Chart</h3>
+                        <canvas id="powerChart"></canvas>
+                    </div>
+                </div>
+                
+                
+            </div>
+        </div>
+
+        <!-- Motor State Control View -->
+        <div id="motorState" class="view" style="display:none">
+            <h2>Motor State Control</h2>
+            <div id = "vertical-container">
+                <div id="horizontal-container">
+                    <div class="infobox">
+                        <h3>Device info</h3>
+                        <p>Motor numbers will be implemented here.</p>
+                        <p>合格率 will be implemented here.</p>
+                    </div>
+                    <div class="infobox">
+                        <h3>General info</h3>
+                        <p>Average Voltage.</p>
+                        <p>Average Current</p>
+                        <p>Average Speed</p>
+                    </div>
+                </div>
+
+                <div class="horizontal-container">
+                    <div class ="chart-item">
+                        <h3>Voltage</h3>
+                        <label for="voltageRef">Set Voltage Reference:</label>
+                        <input type="number" id="voltageRef" placeholder="Voltage (V)">
+                        <button onclick="setReference()">Set</button>
+                    </div>
+                    <div class="chart-item">
+                        <h3>Current</h3>
+                        <label for="currentRef">Set Current Reference:</label>
+                        <input type="number" id="currentRef" placeholder="Current (A)">
+                        <button onclick="setReference()">Set</button>
+                    </div>
+                    <div class="chart-item">
+                        <h3>Speed</h3>
+                        <label for="speedRef">Set Speed Reference:</label>
+                        <input type="number" id="speedRef" placeholder="Speed (RPM)">
+                        <button onclick="setReference()">Set</button>
+                    </div>
+                </div>
+                    
+
+                    
+
+                    
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3"></script>
+
+    <script src="{{ url_for('static', filename='script.js') }}"></script>
+</body>
+</html>

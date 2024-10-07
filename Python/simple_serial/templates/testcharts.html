@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Serial Data Visualization</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='common.css') }}">
+</head>
+<body>
+    <div class="sidebar">
+        <ul>
+            <li><a href="#" onclick="showView('motorState')">Motor State Control</a></li>
+            <li><a href="#" onclick="showView('realTimeData')">Real-Time Data</a></li>
+        </ul>
+    </div>
+
+    <div class="main-content">
+        <!-- Motor State Control View -->
+        <div id="motorState" class="view" style="display: none;">
+            <h2>Motor State Control</h2>
+            <!-- Add motor control elements here -->
+            <p>Motor control interface will be implemented here.</p>
+        </div>
+
+        <!-- Real-Time Data View -->
+        <div id="realTimeData" class="view">
+            <h2>Real-Time Data</h2>
+            <div class="motor-selection">
+                <label for="motorIDs">Select Motor:</label>
+                <select id="motorIDs">
+                    <option value="M1">Motor 1</option>
+                    <option value="M2">Motor 2</option>
+                </select>
+            </div>
+            <div class="charts-container">
+                <div class="chart-item">
+                    <h3>Voltage Chart</h3>
+                    <canvas id="voltageChart"></canvas>
+                </div>
+                <div class="chart-item">
+                    <h3>Current Chart</h3>
+                    <canvas id="currentChart"></canvas>
+                </div>
+                <div class="chart-item">
+                    <h3>Speed Chart</h3>
+                    <canvas id="speedChart"></canvas>
+                </div>
+                <div class="chart-item">
+                    <h3>Power Chart</h3>
+                    <canvas id="powerChart"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Include Chart.js and date adapter -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3"></script>
+    <!-- Include your custom JavaScript file -->
+    <script src="{{ url_for('static', filename='test.js') }}"></script>
+</body>
+</html>

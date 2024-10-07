@@ -1,0 +1,15 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8"></meta>
+    <link rel="stylesheet" type="text/css" href="{{ url_for('static', filename='common.css') }}">
+    <!--notice the type is text/css not only css-->
+</head>
+<body>
+<h1 class ='xx'>Please Log in</h1>
+<form action="/log" method="post">
+<input type="text" name="username" placeholder="username"></input>
+<!--notice that name is necessary for passing data -->
+</form>
+</body>
+</html>

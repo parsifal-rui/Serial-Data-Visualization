@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>上位机数据可视化</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        .chart-container {
+            width: 45%;
+            margin: 10px;
+            display: inline-block;
+        }
+    </style>
+</head>
+<body>
+    <h1>上位机数据可视化</h1>
+    <div id="info">
+        <p>基本信息: 这里显示系统的基本信息</p>
+    </div>
+    <div class="chart-container">
+        <canvas id="currentChart"></canvas>
+    </div>
+    <div class="chart-container">
+        <canvas id="voltageChart"></canvas>
+    </div>
+    <div class="chart-container">
+        <canvas id="speedChart"></canvas>
+    </div>
+    <div class="chart-container">
+        <canvas id="powerChart"></canvas>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>

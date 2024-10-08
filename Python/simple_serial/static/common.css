@@ -141,6 +141,8 @@ table tbody tr:nth-child(even) {
 @media (max-width: 1200px) {
     .horizontal-container {
         display:flex;
+        justify-content: space-between; /* 控制内部元素的水平间距 */
+        align-items: center; /* 垂直居中对齐 */
     }
 
     .vertical-container {
@@ -203,7 +205,10 @@ table tbody tr:nth-child(even) {
     background-color: #0056b3;
 }
 .infobox {
-    flex: 1;
-    padding: 10px;
-    /* 其他样式，如边框、背景颜色等 */
+    width: 30%;    /* 每个 infobox 的基础宽度为 45%，确保两者水平排列 */
+    padding: 10px;          /* 设置内部边距 */
+    margin: 10px;           /* 设置外部边距，避免过于靠近 */
+    background-color: #f0f0f0; /* 设置背景颜色，便于观察效果 */
+    border: 1px solid #ccc; /* 设置边框 */
+    box-sizing: border-box;  /* 确保 padding 不影响宽度 */
 }

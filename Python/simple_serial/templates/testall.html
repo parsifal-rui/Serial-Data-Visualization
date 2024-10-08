@@ -74,12 +74,13 @@
         <div id="motorState" class="view" style="display:none">
             <h2>Motor State Control</h2>
             <div id = "horizontal-container">
-                <div id="veritical-container">
+                <div id="vertical-container">
                     <div class="infobox">
                         <h3>Device info</h3>
                         <p>Motor numbers will be implemented here.</p>
                         <p>合格率 will be implemented here.</p>
                     </div>
+
                     <div class="infobox">
                         <h3>General info</h3>
                         <p>Average Voltage.</p>
@@ -88,7 +89,7 @@
                     </div>
                 </div>
 
-                <div class="vertical-container">
+                <div class="horizontal-container">
                     <div class ="chart-item">
                         <h3>Voltage</h3>
                         <label for="voltageRef">Set Voltage Reference:</label>
@@ -121,8 +122,9 @@
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation@1.1.0"></script>
     <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3"></script>
 
-    <script src="{{ url_for('static', filename='script.js') }}"></script>
+    <script src="{{ url_for('static', filename='testViewall.js') }}"></script>
 </body>
 </html>

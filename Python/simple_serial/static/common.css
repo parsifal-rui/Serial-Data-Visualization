@@ -130,11 +130,12 @@ table tbody tr:nth-child(even) {
 /* Chart container styling */
 .chart-item {
     margin-bottom: 30px;
+    height:400px;
 }
 
 .chart-item canvas {
     max-width: 100%;
-    height: auto;
+    height: 200px;
 }
 
 /* Responsive adjustments */
@@ -205,10 +206,11 @@ table tbody tr:nth-child(even) {
     background-color: #0056b3;
 }
 .infobox {
-    width: 30%;    /* 每个 infobox 的基础宽度为 45%，确保两者水平排列 */
-    padding: 10px;          /* 设置内部边距 */
-    margin: 10px;           /* 设置外部边距，避免过于靠近 */
+    width: 45%;    /* 每个 infobox 的基础宽度为 45%，确保两者水平排列 */
+    height: 200px;
+    padding: 20px;          /* 设置内部边距 */
+    margin: 20px;           /* 设置外部边距，避免过于靠近 */
     background-color: #f0f0f0; /* 设置背景颜色，便于观察效果 */
-    border: 1px solid #ccc; /* 设置边框 */
+    border: 5px solid #ccc; /* 设置边框 */
     box-sizing: border-box;  /* 确保 padding 不影响宽度 */
 }

@@ -1,3 +1,4 @@
+
 // Function to show the desired view
 function showView(viewId) {
   let views = document.getElementsByClassName('view');
@@ -16,8 +17,29 @@ let allMotorsVoltageChart = new Chart(
       datasets: [],
     },
     options: {
-      // Chart options
-    },
+      plugins: {
+        annotation: {
+          annotations: {
+            voltageLine: {
+              type: 'line',
+              yMin: 0,
+              yMax: 0,
+              borderColor: 'red',
+              borderWidth: 2,
+              label: {
+                enabled: true,
+                content: 'Voltage Reference',
+                position: 'end'
+              }
+            }
+          }
+        }
+      },
+      scales: {
+        x: { stacked: true },
+        y: { beginAtZero: true, stacked: true }
+      }
+    }
   }
 );
 
@@ -30,8 +52,29 @@ let allMotorsCurrentChart = new Chart(
       datasets: [],
     },
     options: {
-      // Chart options
-    },
+      plugins: {
+        annotation: {
+          annotations: {
+            currentLine: {
+              type: 'line',
+              yMin: 0,
+              yMax: 0,
+              borderColor: 'blue',
+              borderWidth: 2,
+              label: {
+                enabled: true,
+                content: 'Current Reference',
+                position: 'end'
+              }
+            }
+          }
+        }
+      },
+      scales: {
+        x: { stacked: true },
+        y: { beginAtZero: true, stacked: true }
+      }
+    }
   }
 );
 
@@ -44,10 +87,32 @@ let allMotorsSpeedChart = new Chart(
       datasets: [],
     },
     options: {
-      // Chart options
-    },
+      plugins: {
+        annotation: {
+          annotations: {
+            speedLine: {
+              type: 'line',
+              yMin: 0,
+              yMax: 0,
+              borderColor: 'green',
+              borderWidth: 2,
+              label: {
+                enabled: true,
+                content: 'Speed Reference',
+                position: 'end'
+              }
+            }
+          }
+        }
+      },
+      scales: {
+        x: { stacked: true },
+        y: { beginAtZero: true, stacked: true }
+      }
+    }
   }
 );
+
 
 // Function to update all motors' charts
 function updateAllMotorsCharts(time, motorData) {
@@ -98,9 +163,13 @@ function updateChartDatasets(chart, time, motorData, parameter) {
 
 // Function to get a random color
 function getRandomColor() {
-  // Implementation...
+  const letters = '0123456789ABCDEF';
+  let color = '#';
+  for (let i = 0; i < 6; i++) {
+    color += letters[Math.floor(Math.random() * 16)];
+  }
+  return color;
 }
-
 // Fetch data and update charts
 function fetchData() {
   fetch('/data')
@@ -112,6 +181,34 @@ function fetchData() {
     .catch((error) => {
       console.error('Error fetching data:', error);
     });
+}
+// Function to set reference line based on input value
+// Function to set reference line based on input value
+function setReference(type) {
+  const voltageRefValue = parseFloat(document.getElementById('voltageRef').value); // 确保输入的数值为浮点数
+  const currentRefValue = parseFloat(document.getElementById('currentRef').value);
+  const speedRefValue = parseFloat(document.getElementById('speedRef').value);
+
+  // 为电压设置参考线
+  if (type === 'voltage' && !isNaN(voltageRefValue)) {  // 确保值不为空且为有效数字
+    allMotorsVoltageChart.options.plugins.annotation.annotations.voltageLine.yMin = voltageRefValue;
+    allMotorsVoltageChart.options.plugins.annotation.annotations.voltageLine.yMax = voltageRefValue;
+    allMotorsVoltageChart.update();
+  }
+  
+  // 为电流设置参考线
+  else if (type === 'current' && !isNaN(currentRefValue)) {
+    allMotorsCurrentChart.options.plugins.annotation.annotations.currentLine.yMin = currentRefValue;
+    allMotorsCurrentChart.options.plugins.annotation.annotations.currentLine.yMax = currentRefValue;
+    allMotorsCurrentChart.update();
+  }
+
+  // 为速度设置参考线
+  else if (type === 'speed' && !isNaN(speedRefValue)) {
+    allMotorsSpeedChart.options.plugins.annotation.annotations.speedLine.yMin = speedRefValue;
+    allMotorsSpeedChart.options.plugins.annotation.annotations.speedLine.yMax = speedRefValue;
+    allMotorsSpeedChart.update();
+  }
 }
 
 // Start fetching data at intervals

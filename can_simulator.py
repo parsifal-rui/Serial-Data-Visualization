@@ -145,4 +145,12 @@ class MotorSimulator:
             
             self.can_bus.send(VirtualCANMessage(CAN_ID_SPEED, speed_data))
             
-            time.sleep(0.01)  # 提高到100Hz更新率 
+            # 模拟位置数据
+            position = int(time.time() * 100) % 8192  # 模拟电机旋转
+            position_msg = VirtualCANMessage(
+                arbitration_id=CAN_ID_POSITION,
+                data=list(position.to_bytes(2, byteorder='little', signed=True)) + [0]*6
+            )
+            self.can_bus.send(position_msg)
+            
+            time.sleep(0.01)  # 控制发送频率 

@@ -3,6 +3,7 @@ CAN_ID_CURRENT = 0x201    # 电流数据
 CAN_ID_VOLTAGE = 0x202    # 电压数据
 CAN_ID_SPEED = 0x203      # 速度数据
 CAN_ID_CONTROL = 0x204    # 控制指令
+CAN_ID_POSITION = 0x205   # 位置数据
 
 # 故障码定义
 FAULT_NONE = 0x0000       # 正常
@@ -12,17 +13,12 @@ FAULT_OVER_TEMP = 0x0004     # 过温
 FAULT_STALL = 0x0008         # 堵转
 FAULT_COMM = 0x0010          # 通信故障
 
-# 控制命令定义
-CMD_START = 0x01          # 启动电机
-CMD_STOP = 0x02          # 停止电机
-CMD_SPEED = 0x03         # 设置速度
-CMD_MODE = 0x04          # 设置模式
-CMD_CLEAR_FAULT = 0x05    # 清除故障
-CMD_JOG = 0x06           # 点动运行
-CMD_POSITION = 0x07      # 位置控制
-CMD_AUTO_TUNING = 0x08   # 参数自学习
-CMD_INERTIA_ID = 0x09    # 惯量识别
-CMD_RESONANCE_DET = 0x0A # 共振检测
+# 控制命令
+CMD_START = 0x01      # 启动
+CMD_STOP = 0x02      # 停止
+CMD_SPEED_UP = 0x03  # 加速
+CMD_SPEED_DOWN = 0x04 # 减速  
+CMD_REVERSE = 0x05   # 反向
 
 # 运行模式
 MODE_SPEED = 0x01        # 速度模式

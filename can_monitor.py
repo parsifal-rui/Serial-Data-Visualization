@@ -34,6 +34,7 @@ class VirtualCANMessage:
 # can_monitor.py
 import tkinter as tk
 from tkinter import ttk, messagebox
+
 import threading
 import time
 from datetime import datetime
@@ -42,42 +43,57 @@ from utils.constants import *
 class CANMonitor:
     def __init__(self, root, can_bus):
         self.root = root
-        self.root.title("CAN通信监控器")
+        self.root.title("电机控制监控系统")
+        self.root.geometry("800x600")  # 设置窗口初始大小
         self.bus = can_bus
         self.is_running = False
         self.data_logger = None  # 可选的数据记录器
         
+        # 设置主题样式
+        style = ttk.Style()
+        style.theme_use('clam')  # 使用clam主题
+        
+        # 自定义按钮样式
+        style.configure('Primary.TButton',
+                       background='#007bff',
+                       foreground='white',
+                       padding=5)
+        style.configure('Success.TButton',
+                       background='#28a745',
+                       foreground='white',
+                       padding=5)
+        style.configure('Warning.TButton',
+                       background='#ffc107',
+                       foreground='black',
+                       padding=5)
+        
+        # 设置表格样式
+        style.configure("Treeview",
+                        background="#f8f9fa",
+                        foreground="black",
+                        rowheight=25,
+                        fieldbackground="#f8f9fa")
+        style.configure("Treeview.Heading",
+                        background="#e9ecef",
+                        foreground="black",
+                        relief="flat")
+        style.map("Treeview.Heading",
+                  relief=[('active','groove'),('pressed','sunken')])
+        
         # 创建主框架
-        main_frame = ttk.Frame(root)
-        main_frame.pack(padx=10, pady=10, fill=tk.BOTH, expand=True)
+        main_frame = ttk.Frame(root, padding="10")
+        main_frame.pack(fill=tk.BOTH, expand=True)
         
-        # 连接按钮
-        self.connect_btn = ttk.Button(main_frame, text="连接", command=self.toggle_connection)
-        self.connect_btn.pack(pady=5)
+        # 顶部控制区
+        top_frame = ttk.Frame(main_frame)
+        top_frame.pack(fill=tk.X, pady=(0, 10))
         
-        # 发送框架
-        send_frame = ttk.LabelFrame(main_frame, text="发送数据")
-        send_frame.pack(fill=tk.X, pady=5)
-        
-        # ID输入
-        id_frame = ttk.Frame(send_frame)
-        id_frame.pack(fill=tk.X, padx=5, pady=5)
-        ttk.Label(id_frame, text="ID (hex):").pack(side=tk.LEFT)
-        self.send_id = ttk.Entry(id_frame, width=10)
-        self.send_id.insert(0, '123')
-        self.send_id.pack(side=tk.LEFT, padx=5)
-        
-        # 数据输入
-        data_frame = ttk.Frame(send_frame)
-        data_frame.pack(fill=tk.X, padx=5, pady=5)
-        ttk.Label(data_frame, text="数据 (hex):").pack(side=tk.LEFT)
-        self.send_data = ttk.Entry(data_frame)
-        self.send_data.insert(0, '11 22 33 44')
-        self.send_data.pack(side=tk.LEFT, padx=5, fill=tk.X, expand=True)
-        
-        # 发送按钮
-        self.send_btn = ttk.Button(send_frame, text="发送", command=self.send_message)
-        self.send_btn.pack(pady=5)
+        # 连接按钮使用新样式
+        self.connect_btn = ttk.Button(top_frame, 
+                                     text="连接设备",
+                                     style='Primary.TButton',
+                                     command=self.toggle_connection)
+        self.connect_btn.pack(side=tk.LEFT, padx=5)
         
         # 接收显示区域
         receive_frame = ttk.LabelFrame(main_frame, text="接收数据")
@@ -85,12 +101,20 @@ class CANMonitor:
         
         # 创建表格显示
         columns = ('时间', 'ID', '数据', '解析值')
-        self.tree = ttk.Treeview(receive_frame, columns=columns, show='headings')
+        self.tree = ttk.Treeview(receive_frame, 
+                                 columns=columns,
+                                 show='headings',
+                                 height=6)  # 减小显示行数
+        
+        # 设置列宽和对齐方式
+        self.tree.column('时间', width=80, anchor='center')
+        self.tree.column('ID', width=60, anchor='center')
+        self.tree.column('数据', width=150, anchor='w')
+        self.tree.column('解析值', width=200, anchor='w')
         
         # 设置列标题
         for col in columns:
             self.tree.heading(col, text=col)
-            self.tree.column(col, width=100)
         
         # 添加滚动条
         scrollbar = ttk.Scrollbar(receive_frame, orient="vertical", command=self.tree.yview)
@@ -117,13 +141,61 @@ class CANMonitor:
                    command=self.show_plot_window).pack(side=tk.LEFT, padx=5)
         ttk.Button(button_frame, text="参数配置", 
                    command=self.show_config_window).pack(side=tk.LEFT, padx=5)
-        ttk.Button(button_frame, text="电机控制", 
-                   command=self.show_control_window).pack(side=tk.LEFT, padx=5)
+        #ttk.Button(button_frame, text="电机控制", 
+        #           command=self.show_control_window).pack(side=tk.LEFT, padx=5)
+        
+        # 添加电机控制按钮框架
+        control_frame = ttk.LabelFrame(main_frame, text="电机控制", padding=10)
+        control_frame.pack(fill=tk.X, pady=5)
+        
+        # 使用新样式的控制按钮
+        ttk.Button(control_frame, text="启动", 
+                  style='Success.TButton',
+                  command=lambda: self.send_motor_command(CMD_START)).pack(side=tk.LEFT, padx=5)
+        
+        # 启停控制
+        ttk.Button(control_frame, text="停止",
+                  command=lambda: self.send_motor_command(CMD_STOP)).pack(side=tk.LEFT, padx=5)
+        
+        # 速度控制
+        ttk.Button(control_frame, text="加速",
+                  command=lambda: self.send_motor_command(CMD_SPEED_UP)).pack(side=tk.LEFT, padx=5)
+        ttk.Button(control_frame, text="减速",
+                  command=lambda: self.send_motor_command(CMD_SPEED_DOWN)).pack(side=tk.LEFT, padx=5)
+        
+        # 方向控制
+        ttk.Button(control_frame, text="反向",
+                  command=lambda: self.send_motor_command(CMD_REVERSE)).pack(side=tk.LEFT, padx=5)
+        
+        # 状态栏
+        self.status_bar = ttk.Label(main_frame,
+                                   text="就绪",
+                                   relief=tk.SUNKEN,
+                                   padding=(5, 2))
+        self.status_bar.pack(side=tk.BOTTOM, fill=tk.X)
+
+        # 在按钮上添加提示信息
+        self.connect_btn.bind('<Enter>', 
+            lambda e: self.show_tooltip(e, "连接或断开CAN设备"))
 
     def set_data_logger(self, logger):
         """设置数据记录器"""
         self.data_logger = logger
-
+    def send_motor_command(self, cmd):
+        """发送电机控制命令"""
+        if not self.bus or not self.bus.connected:
+            messagebox.showerror("错误", "请先连接CAN设备")
+            return
+            
+        try:
+            # 创建控制消息
+            msg = VirtualCANMessage(
+                arbitration_id=CAN_ID_CONTROL,  # 控制命令ID
+                data=[cmd, 0, 0, 0, 0, 0, 0, 0]  # 命令字节
+            )
+            self.bus.send(msg)
+        except Exception as e:
+            messagebox.showerror("错误", f"发送失败: {str(e)}")
     def toggle_connection(self):
         """切换连接状态"""
         if not self.is_running:
@@ -133,33 +205,15 @@ class CANMonitor:
                 self.connect_btn.config(text="断开")
                 # 启动接收线程
                 self.receive_thread = threading.Thread(target=self.receive_messages)
-                self.receive_thread.daemon = True
+                self.receive_thread.daemon = True  # 设置为守护线程
                 self.receive_thread.start()
+                self.update_status("已连接")  # 更新状态栏
         else:
             self.is_running = False
             if self.bus:
                 self.bus.connected = False
             self.connect_btn.config(text="连接")
-
-    def send_message(self):
-        """发送CAN消息"""
-        if not self.bus or not self.bus.connected:
-            messagebox.showerror("错误", "请先连接CAN设备")
-            return
-            
-        try:
-            # 解析ID和数据
-            msg_id = int(self.send_id.get(), 16)
-            data = [int(x, 16) for x in self.send_data.get().split()]
-            
-            # 创建并发送消息
-            msg = VirtualCANMessage(
-                arbitration_id=msg_id,
-                data=data
-            )
-            self.bus.send(msg)
-        except Exception as e:
-            messagebox.showerror("错误", f"发送失败: {str(e)}")
+            self.update_status("已断开")  # 更新状态栏
 
     def receive_messages(self):
         """接收CAN消息的线程函数"""
@@ -191,14 +245,19 @@ class CANMonitor:
             torque_current = int.from_bytes(msg.data[4:6], byteorder='little', signed=True) / 10
             return f"Speed={actual_speed}rpm, Target={target_speed}rpm, Torque={torque_current:.1f}A"
             
+        elif msg.arbitration_id == CAN_ID_POSITION:
+            position = int.from_bytes(msg.data[0:2], byteorder='little', signed=True)
+            angle = position * 360.0 / 8192  # 转换为角度
+            return f"Position={position}, Angle={angle:.1f}°"
+            
         return "Unknown message"
 
     def update_display(self, msg):
         """更新显示接收到的消息"""
+        # 更新表格显示
         time_str = datetime.now().strftime('%H:%M:%S.%f')[:-3]
         data_str = ' '.join(f'{b:02X}' for b in msg.data)
         parsed_str = self.parse_message(msg)
-        
         self.tree.insert('', 0, values=(time_str, f'{msg.arbitration_id:X}', data_str, parsed_str))
         
         # 更新波形显示
@@ -241,11 +300,45 @@ class CANMonitor:
         if not hasattr(self, 'config_window') or not self.config_window.window.winfo_exists():
             self.config_window = ConfigWindow(self.root)
         
-    def show_control_window(self):
-        """显示控制窗口"""
-        from gui.control_window import ControlWindow
-        if not hasattr(self, 'control_window') or not self.control_window.window.winfo_exists():
-            self.control_window = ControlWindow(self.root, self.bus)
+    #def show_control_window(self):
+    #    """显示控制窗口"""
+    #    from gui.control_window import ControlWindow
+    #    if not hasattr(self, 'control_window') or not self.control_window.window.winfo_exists():
+    #        self.control_window = ControlWindow(self.root, self.bus)
+
+    def send_motor_command(self, cmd):
+        """发送电机控制命令"""
+        if not self.bus or not self.bus.connected:
+            messagebox.showerror("错误", "请先连接CAN设备")
+            return
+            
+        try:
+            # 创建控制消息
+            msg = VirtualCANMessage(
+                arbitration_id=CAN_ID_CONTROL,  # 控制命令ID
+                data=[cmd, 0, 0, 0, 0, 0, 0, 0]  # 命令字节
+            )
+            self.bus.send(msg)
+        except Exception as e:
+            messagebox.showerror("错误", f"发送失败: {str(e)}")
+
+    def update_status(self, text):
+        """更新状态栏信息"""
+        self.status_bar.config(text=text)
+
+    def show_tooltip(self, event, text):
+        """显示悬停提示"""
+        x, y, _, _ = event.widget.bbox("insert")
+        x += event.widget.winfo_rootx() + 25
+        y += event.widget.winfo_rooty() + 20
+        
+        self.tooltip = tk.Toplevel(event.widget)
+        self.tooltip.wm_overrideredirect(True)
+        self.tooltip.wm_geometry(f"+{x}+{y}")
+        
+        label = ttk.Label(self.tooltip, text=text, 
+                          background="#ffffe0", relief='solid', borderwidth=1)
+        label.pack()
 
 if __name__ == '__main__':
     root = tk.Tk()

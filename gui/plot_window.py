@@ -27,44 +27,35 @@ class PlotWindow:
     def __init__(self, parent):
         self.window = tk.Toplevel(parent)
         self.window.title("实时波形显示")
-        self.window.geometry("1200x800")  # 加宽窗口以容纳两列
+        self.window.geometry("1200x800")
         
         # 创建图表
         self.fig = Figure(figsize=(12, 10))
         
-        # 创建2x3网格布局
-        gs = self.fig.add_gridspec(3, 2, width_ratios=[2, 1], hspace=0.3, wspace=0.3)
+        # 修改网格布局为2x3
+        gs = self.fig.add_gridspec(2, 3, width_ratios=[2, 1, 1], hspace=0.3, wspace=0.3)
         
-        # 左列放置三相数据
-        # 电流图表
+        # 左列放置波形图(占2格)
         self.ax_current = self.fig.add_subplot(gs[0, 0])
-        self.ax_current.set_title("三相电流")
-        self.ax_current.set_ylabel("电流 (A)")
+        self.ax_speed = self.fig.add_subplot(gs[1, 0])
         
-        # 电压图表
-        self.ax_voltage = self.fig.add_subplot(gs[1, 0])
-        self.ax_voltage.set_title("三相电压")
-        self.ax_voltage.set_ylabel("电压 (V)")
-        
-        # 速度和转矩图表
-        self.ax_speed = self.fig.add_subplot(gs[2, 0])
-        self.ax_speed.set_title("速度和转矩")
-        self.ax_speed.set_ylabel("速度 (rpm)")
-        self.ax_speed2 = self.ax_speed.twinx()
-        self.ax_speed2.set_ylabel("转矩电流 (A)")
-        
-        # 右列放置位置极坐标图
+        # 中列放置位置极坐标图(占2格)
         self.ax_position = self.fig.add_subplot(gs[:, 1], projection='polar')
-        self.ax_position.set_title("电机位置")
-        self.ax_position.set_theta_zero_location('N')  # 设置0度位置在正上方
-        self.ax_position.set_theta_direction(-1)  # 设置角度增长方向为顺时针
         
-        # 为位置图添加刻度标签
-        self.ax_position.set_xticks(np.linspace(0, 2*np.pi, 8, endpoint=False))
-        self.ax_position.set_xticklabels(['0°', '45°', '90°', '135°', '180°', '225°', '270°', '315°'])
+        # 右列放置仪表盘(速度和功率)
+        self.ax_speed_gauge = self.fig.add_subplot(gs[0, 2], projection='polar')
+        self.ax_power_gauge = self.fig.add_subplot(gs[1, 2], projection='polar')
+        
+        # 配置速度仪表盘
+        self.ax_speed_gauge.set_title("速度仪表盘")
+        self._setup_gauge(self.ax_speed_gauge, -6000, 6000, "转速(rpm)")
+        
+        # 配置功率仪表盘
+        self.ax_power_gauge.set_title("功率仪表盘")
+        self._setup_gauge(self.ax_power_gauge, 0, 3000, "功率(W)")
         
         # 所有直角坐标图添加网格和标签
-        for ax in [self.ax_current, self.ax_voltage, self.ax_speed]:
+        for ax in [self.ax_current, self.ax_speed]:
             ax.grid(True, linestyle='--', alpha=0.7)
             ax.set_xlabel("采样点")
         
@@ -85,13 +76,8 @@ class PlotWindow:
         self.current_a = deque(maxlen=self.data_len)
         self.current_b = deque(maxlen=self.data_len)
         self.current_c = deque(maxlen=self.data_len)
-        self.voltage_a = deque(maxlen=self.data_len)
-        self.voltage_b = deque(maxlen=self.data_len)
-        self.voltage_c = deque(maxlen=self.data_len)
         self.speed = deque(maxlen=self.data_len)
-        self.torque = deque(maxlen=self.data_len)
-        
-        # 添加位置数据缓存
+        self.speed_ref = deque(maxlen=self.data_len)
         self.position_data = deque(maxlen=self.data_len)
         
         # 图表线条
@@ -104,9 +90,14 @@ class PlotWindow:
         
         # 设置Y轴范围
         self.ax_current.set_ylim(-30, 30)  # 根据实际电流范围调整
-        self.ax_voltage.set_ylim(0, 400)   # 根据实际电压范围调整
         self.ax_speed.set_ylim(-6000, 6000)  # 根据实际转速范围调整
-        self.ax_speed2.set_ylim(-30, 30)     # 根据实际转矩范围调整
+        
+        # 修改速度图表显示
+        if not self.lines.get('speed'):
+            self.lines['speed'] = []
+            self.lines['speed'].append(self.ax_speed.plot([], [], 'r-', label='实际速度')[0])
+            self.lines['speed'].append(self.ax_speed.plot([], [], 'g--', label='目标速度')[0])
+            self.ax_speed.legend(loc='upper right')
         
     def toggle_pause(self):
         """切换暂停/继续状态"""
@@ -126,14 +117,18 @@ class PlotWindow:
         self.time_data.append(msg_time)
         
         try:
+            import struct
+            data_bytes = bytes(data)
+            
             if msg_id == CAN_ID_CURRENT:
-                current_a = int.from_bytes(data[0:2], byteorder='little', signed=True) / 10
-                current_b = int.from_bytes(data[2:4], byteorder='little', signed=True) / 10
-                current_c = int.from_bytes(data[4:6], byteorder='little', signed=True) / 10
+                # 解析三相电流
+                ia = struct.unpack('<f', data_bytes[0:4])[0]
+                ib = struct.unpack('<f', data_bytes[4:8])[0]
+                ic = struct.unpack('<f', data_bytes[8:12])[0]
                 
-                self.current_a.append(current_a)
-                self.current_b.append(current_b)
-                self.current_c.append(current_c)
+                self.current_a.append(ia)
+                self.current_b.append(ib)
+                self.current_c.append(ic)
                 
                 # 更新电流图表
                 if not self.lines.get('current'):
@@ -150,59 +145,40 @@ class PlotWindow:
                 self.ax_current.relim()
                 self.ax_current.autoscale_view()
                 
-            elif msg_id == CAN_ID_VOLTAGE:
-                voltage_a = int.from_bytes(data[0:2], byteorder='little', signed=False) / 10
-                voltage_b = int.from_bytes(data[2:4], byteorder='little', signed=False) / 10
-                voltage_c = int.from_bytes(data[4:6], byteorder='little', signed=False) / 10
-                
-                self.voltage_a.append(voltage_a)
-                self.voltage_b.append(voltage_b)
-                self.voltage_c.append(voltage_c)
-                
-                # 更新电压图表
-                if not self.lines.get('voltage'):
-                    self.lines['voltage'] = []
-                    self.lines['voltage'].append(self.ax_voltage.plot([], [], 'r-', label='A相')[0])
-                    self.lines['voltage'].append(self.ax_voltage.plot([], [], 'g-', label='B相')[0])
-                    self.lines['voltage'].append(self.ax_voltage.plot([], [], 'b-', label='C相')[0])
-                    self.ax_voltage.legend(loc='upper right')
-                
-                x_data = list(range(len(self.voltage_a)))
-                self.lines['voltage'][0].set_data(x_data, self.voltage_a)
-                self.lines['voltage'][1].set_data(x_data, self.voltage_b)
-                self.lines['voltage'][2].set_data(x_data, self.voltage_c)
-                self.ax_voltage.relim()
-                self.ax_voltage.autoscale_view()
-                
+                # 计算功率
+                speed = self.speed[-1] if len(self.speed) > 0 else 0
+                power = abs(speed * 2 * np.pi / 60) * (abs(ia) + abs(ib) + abs(ic))/3 * 48  # 假设48V电压
+                self._update_gauge(self.ax_power_gauge, power, 0, 3000)
+            
             elif msg_id == CAN_ID_SPEED:
-                speed = int.from_bytes(data[0:2], byteorder='little', signed=True)
-                torque = int.from_bytes(data[4:6], byteorder='little', signed=True) / 10
+                # 解析速度数据
+                speed_ref = struct.unpack('<f', data_bytes[0:4])[0]
+                speed_actual = struct.unpack('<f', data_bytes[4:8])[0]
                 
-                self.speed.append(speed)
-                self.torque.append(torque)
+                self.speed.append(speed_actual)
+                self.speed_ref.append(speed_ref)
                 
-                # 更新速度和转矩图表
+                # 更新速度图表
                 if not self.lines.get('speed'):
                     self.lines['speed'] = []
-                    self.lines['speed'].append(self.ax_speed.plot([], [], 'r-', label='速度')[0])
-                    self.lines['speed'].append(self.ax_speed2.plot([], [], 'b-', label='转矩')[0])
-                    # 合并两个y轴的图例
-                    lines = [self.lines['speed'][0], self.lines['speed'][1]]
-                    labels = ['速度', '转矩']
-                    self.ax_speed.legend(lines, labels, loc='upper right')
+                    self.lines['speed'].append(self.ax_speed.plot([], [], 'r-', label='实际速度')[0])
+                    self.lines['speed'].append(self.ax_speed.plot([], [], 'g--', label='目标速度')[0])
+                    self.ax_speed.legend(loc='upper right')
                 
                 x_data = list(range(len(self.speed)))
                 self.lines['speed'][0].set_data(x_data, self.speed)
-                self.lines['speed'][1].set_data(x_data, self.torque)
+                self.lines['speed'][1].set_data(x_data, self.speed_ref)
                 self.ax_speed.relim()
                 self.ax_speed.autoscale_view()
-                self.ax_speed2.relim()
-                self.ax_speed2.autoscale_view()
+                
+                # 更新速度仪表盘
+                self._update_gauge(self.ax_speed_gauge, speed_actual, -6000, 6000)
             
             elif msg_id == CAN_ID_POSITION:
-                position = int.from_bytes(data[0:2], byteorder='little', signed=True)
-                angle = position * 360.0 / 8192  # 转换为角度
-                angle_rad = np.deg2rad(angle)  # 转换为弧度
+                # 解析位置数据
+                position = struct.unpack('<f', data_bytes[0:4])[0]
+                angle = position * 360.0 / 8192
+                angle_rad = np.deg2rad(angle)
                 
                 if not self.lines.get('position'):
                     # 创建指针线和圆弧
@@ -221,3 +197,53 @@ class PlotWindow:
             self.canvas.draw_idle()
         except Exception as e:
             print(f"波形更新错误: {str(e)}") 
+
+    def _setup_gauge(self, ax, min_val, max_val, label):
+        """设置仪表盘样式"""
+        # 设置角度范围(-30到210度,转换为弧度)
+        ax.set_thetamin(-30)
+        ax.set_thetamax(210)
+        
+        # 设置半径范围
+        ax.set_rmin(0)
+        ax.set_rmax(1)
+        
+        # 计算刻度位置
+        angles = np.linspace(-30, 210, 9) * np.pi/180
+        labels = np.linspace(min_val, max_val, 9, dtype=int)
+        
+        # 设置刻度
+        ax.set_xticks(angles)
+        ax.set_xticklabels(labels)
+        
+        # 添加标签
+        ax.text(0, -0.2, label, ha='center', va='center', transform=ax.transAxes)
+        
+        # 隐藏r轴刻度
+        ax.set_rticks([])
+        
+        # 添加网格
+        ax.grid(True, alpha=0.3)
+
+    def _update_gauge(self, ax, value, min_val, max_val, color='r'):
+        """更新仪表盘指针"""
+        # 清除旧的指针
+        if hasattr(self, f'{ax.get_label()}_pointer'):
+            getattr(self, f'{ax.get_label()}_pointer').remove()
+        
+        # 计算角度(-30到210度映射到值的范围)
+        angle = -30 + (value - min_val) * 240 / (max_val - min_val)
+        angle_rad = np.deg2rad(angle)
+        
+        # 画指针
+        pointer = ax.plot([0, angle_rad], [0, 0.8], color=color, lw=3)[0]
+        setattr(self, f'{ax.get_label()}_pointer', pointer)
+        
+        # 添加数值显示
+        if hasattr(self, f'{ax.get_label()}_text'):
+            getattr(self, f'{ax.get_label()}_text').remove()
+        text = ax.text(0, 0.6, f'{value:.0f}', 
+                      ha='center', va='center',
+                      color=color,
+                      fontsize=12)
+        setattr(self, f'{ax.get_label()}_text', text) 

@@ -37,18 +37,14 @@ class MotorSimulator:
     def __init__(self, can_bus):
         self.can_bus = can_bus
         self.running = False
-        self.target_speed = 0
-        self.actual_speed = 0
-        self.mode = MODE_SPEED
-        self.temperature = 25.0
         
-        # 模拟参数
-        self.speed_ramp = 100  # rpm/s
-        self.temp_rise = 0.1   # ℃/s
+        # 基本参数
+        self.speed_ref = 0    # 速度参考值
+        self.speed_actual = 0 # 实际速度
+        self.position = 0     # 位置反馈
         
-        # 故障模拟
-        self.fault_timer = None
-        self.fault_type = FAULT_NONE
+        # 三相电流初始相位
+        self.phase = 0
         
     def start_simulation(self):
         self.running = True
@@ -58,7 +54,7 @@ class MotorSimulator:
         self.running = False
         
     def set_target_speed(self, speed):
-        self.target_speed = min(max(speed, -MAX_SPEED), MAX_SPEED)
+        self.speed_ref = min(max(speed, -MAX_SPEED), MAX_SPEED)
         
     def simulate_fault(self, fault_type, duration=5):
         """模拟故障,duration秒后自动恢复"""
@@ -72,85 +68,50 @@ class MotorSimulator:
         self.fault_type = FAULT_NONE
         
     def _simulation_loop(self):
-        last_time = time.time()
-        
         while self.running:
-            current_time = time.time()
-            dt = current_time - last_time
-            last_time = current_time
-            
-            # 更新速度
-            if self.fault_type == FAULT_NONE:
-                speed_diff = self.target_speed - self.actual_speed
-                speed_change = min(abs(speed_diff), self.speed_ramp * dt)
-                if speed_diff > 0:
-                    self.actual_speed += speed_change
-                else:
-                    self.actual_speed -= speed_change
-                    
-                # 更新温度
-                if abs(self.actual_speed) > 0:
-                    self.temperature += self.temp_rise * dt * (abs(self.actual_speed)/MAX_SPEED)
-                else:
-                    self.temperature = max(25.0, self.temperature - self.temp_rise * dt)
-                    
-            else:
-                # 故障状态下速度快速降为0
-                self.actual_speed = max(0, abs(self.actual_speed) - MAX_SPEED * dt)
-                
-            # 生成三相电流
-            phase_angle = (current_time * self.actual_speed * 6 / 60) % (2 * 3.14159)
-            current_a = 20 * math.sin(phase_angle)
-            current_b = 20 * math.sin(phase_angle + 2.0944)  # 120°
-            current_c = 20 * math.sin(phase_angle + 4.1888)  # 240°
-            
-            # 添加随机波动
-            current_a += random.uniform(-1, 1)
-            current_b += random.uniform(-1, 1)
-            current_c += random.uniform(-1, 1)
-            
-            # 发送电流数据
+            # 1. 模拟三相电流 (Ia, Ib, Ic)
+            self.phase += 0.1  # 模拟电机旋转
             current_data = []
-            for current in [current_a, current_b, current_c]:
-                value = int(current * 10)  # 转换为0.1A单位
-                current_data.extend([value & 0xFF, (value >> 8) & 0xFF])
-            current_data.extend([self.fault_type & 0xFF, (self.fault_type >> 8) & 0xFF])
             
-            self.can_bus.send(VirtualCANMessage(CAN_ID_CURRENT, current_data))
+            # 120度相位差的三相电流
+            ia = 10 * math.sin(self.phase)
+            ib = 10 * math.sin(self.phase + 2*math.pi/3)
+            ic = 10 * math.sin(self.phase + 4*math.pi/3)
             
-            # 发送电压数据
-            voltage_base = 220  # 基准电压
-            voltage_a = voltage_base + random.uniform(-5, 5)
-            voltage_b = voltage_base + random.uniform(-5, 5)
-            voltage_c = voltage_base + random.uniform(-5, 5)
+            # 按照vofa格式打包数据
+            current_msg = VirtualCANMessage(
+                arbitration_id=CAN_ID_CURRENT,
+                data=self._pack_float_data([ia, ib, ic])
+            )
+            self.can_bus.send(current_msg)
             
-            voltage_data = []
-            for voltage in [voltage_a, voltage_b, voltage_c]:
-                value = int(voltage * 10)  # 转换为0.1V单位
-                voltage_data.extend([value & 0xFF, (value >> 8) & 0xFF])
-                
-            temp_value = int(self.temperature * 10)  # 转换为0.1℃单位
-            voltage_data.extend([temp_value & 0xFF, (temp_value >> 8) & 0xFF])
+            # 2. 模拟速度数据 (速度参考值和实际速度)
+            # 实际速度逐渐接近参考值
+            speed_diff = self.speed_ref - self.speed_actual
+            self.speed_actual += speed_diff * 0.1
             
-            self.can_bus.send(VirtualCANMessage(CAN_ID_VOLTAGE, voltage_data))
+            speed_msg = VirtualCANMessage(
+                arbitration_id=CAN_ID_SPEED,
+                data=self._pack_float_data([self.speed_ref, self.speed_actual])
+            )
+            self.can_bus.send(speed_msg)
             
-            # 发送速度数据
-            speed_data = []
-            for value in [int(self.actual_speed), int(self.target_speed)]:
-                speed_data.extend([value & 0xFF, (value >> 8) & 0xFF])
+            # 3. 模拟位置数据
+            self.position = (self.position + self.speed_actual * 0.01) % 8192
             
-            torque_current = int(abs(current_a) * 10)  # 简化的转矩电流计算
-            speed_data.extend([torque_current & 0xFF, (torque_current >> 8) & 0xFF])
-            speed_data.extend([self.mode & 0xFF, 0x00])
-            
-            self.can_bus.send(VirtualCANMessage(CAN_ID_SPEED, speed_data))
-            
-            # 模拟位置数据
-            position = int(time.time() * 100) % 8192  # 模拟电机旋转
             position_msg = VirtualCANMessage(
                 arbitration_id=CAN_ID_POSITION,
-                data=list(position.to_bytes(2, byteorder='little', signed=True)) + [0]*6
+                data=self._pack_float_data([self.position])
             )
             self.can_bus.send(position_msg)
             
-            time.sleep(0.01)  # 控制发送频率 
+            time.sleep(0.01)  # 100Hz更新频率
+
+    def _pack_float_data(self, float_list):
+        """将浮点数列表打包为vofa格式的字节数据"""
+        import struct
+        data = bytearray()
+        for value in float_list:
+            data.extend(struct.pack('<f', float(value)))  # 小端浮点数
+        data.extend([0x00, 0x00, 0x80, 0x7F])  # 添加帧尾
+        return list(data) 

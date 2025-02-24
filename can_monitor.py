@@ -226,30 +226,31 @@ class CANMonitor:
 
     def parse_message(self, msg):
         """解析CAN消息内容"""
-        if msg.arbitration_id == CAN_ID_CURRENT:
-            current_a = int.from_bytes(msg.data[0:2], byteorder='little', signed=True) / 10
-            current_b = int.from_bytes(msg.data[2:4], byteorder='little', signed=True) / 10
-            current_c = int.from_bytes(msg.data[4:6], byteorder='little', signed=True) / 10
-            return f"Ia={current_a:.1f}A, Ib={current_b:.1f}A, Ic={current_c:.1f}A"
+        try:
+            import struct
+            data = bytes(msg.data)  # 转换为bytes
             
-        elif msg.arbitration_id == CAN_ID_VOLTAGE:
-            voltage_a = int.from_bytes(msg.data[0:2], byteorder='little', signed=False) / 10
-            voltage_b = int.from_bytes(msg.data[2:4], byteorder='little', signed=False) / 10
-            voltage_c = int.from_bytes(msg.data[4:6], byteorder='little', signed=False) / 10
-            temp = int.from_bytes(msg.data[6:8], byteorder='little', signed=True) / 10
-            return f"Va={voltage_a:.1f}V, Vb={voltage_b:.1f}V, Vc={voltage_c:.1f}V, T={temp:.1f}°C"
+            if msg.arbitration_id == CAN_ID_CURRENT:
+                # 解析三个浮点数(Ia, Ib, Ic)
+                ia = struct.unpack('<f', data[0:4])[0]
+                ib = struct.unpack('<f', data[4:8])[0]
+                ic = struct.unpack('<f', data[8:12])[0]
+                return f"Ia={ia:.1f}A, Ib={ib:.1f}A, Ic={ic:.1f}A"
             
-        elif msg.arbitration_id == CAN_ID_SPEED:
-            actual_speed = int.from_bytes(msg.data[0:2], byteorder='little', signed=True)
-            target_speed = int.from_bytes(msg.data[2:4], byteorder='little', signed=True)
-            torque_current = int.from_bytes(msg.data[4:6], byteorder='little', signed=True) / 10
-            return f"Speed={actual_speed}rpm, Target={target_speed}rpm, Torque={torque_current:.1f}A"
+            elif msg.arbitration_id == CAN_ID_SPEED:
+                # 解析两个浮点数(参考速度,实际速度)
+                speed_ref = struct.unpack('<f', data[0:4])[0]
+                speed_actual = struct.unpack('<f', data[4:8])[0]
+                return f"Speed={speed_actual:.0f}rpm, Target={speed_ref:.0f}rpm"
             
-        elif msg.arbitration_id == CAN_ID_POSITION:
-            position = int.from_bytes(msg.data[0:2], byteorder='little', signed=True)
-            angle = position * 360.0 / 8192  # 转换为角度
-            return f"Position={position}, Angle={angle:.1f}°"
+            elif msg.arbitration_id == CAN_ID_POSITION:
+                # 解析一个浮点数(位置)
+                position = struct.unpack('<f', data[0:4])[0]
+                angle = position * 360.0 / 8192
+                return f"Position={position:.0f}, Angle={angle:.1f}°"
             
+        except Exception as e:
+            print(f"解析错误: {str(e)}")
         return "Unknown message"
 
     def update_display(self, msg):

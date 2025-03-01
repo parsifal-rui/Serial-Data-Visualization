@@ -1,14 +1,23 @@
 from PyQt5 import QtCore, QtGui, QtWidgets
-from PyQt5.QtCore import QTimer
+from PyQt5.QtCore import QTimer, Qt
 from datetime import datetime
 import sys
 import time
+import os
+import math
 
-from pyqt5.design import Ui_MainWindow
+# 添加字体图标支持
+from PyQt5.QtGui import QFontDatabase, QFont
+
+from pyqt5.new_design import Ui_MainWindow
 from utils.constants import *
 from gui.plot_window import PlotWindow
 from can_simulator import VirtualCANMessage, VirtualCANBus, MotorSimulator
 from data_logger import DataLogger
+from can_bus import RealCANBus
+from warning_system import WarningSystem
+from warning_dialog import WarningSettingsDialog, WarningHistoryDialog
+from dashboard import PositionDashBoard, SpeedDashBoard, PowerDashBoard, CurrentLineChart
 
 class MainQtWindow(QtWidgets.QMainWindow):
     def __init__(self, can_bus):
@@ -16,184 +25,103 @@ class MainQtWindow(QtWidgets.QMainWindow):
         self.ui = Ui_MainWindow()
         self.ui.setupUi(self)
         
+        # 设置所有图标
+        self.setup_icons()
+        
         self.can_bus = can_bus
         self.data_logger = None
         self.plot_window = None
+        self.simulator = None  # 添加模拟器引用
         
         # 设置定时器用于轮询CAN消息
         self.timer = QTimer()
         self.timer.timeout.connect(self.poll_messages)
         self.timer.start(10)  # 10ms轮询间隔
         
-        # 初始化UI组件
-        self.setup_ui()
-        
         # 连接信号和槽
         self.connect_signals()
         
-    def setup_ui(self):
-        """初始化UI组件"""
-        # 设置窗口标题和大小
-        self.setWindowTitle("电机监控系统")
-        self.setMinimumSize(1000, 700)  # 设置最小窗口大小
+        # 初始化表格
+        self.init_tables()
         
-        # 调整主布局间距
-        self.ui.widget.setContentsMargins(20, 10, 20, 10)  # 设置主widget的边距
-        self.ui.verticalLayout.setSpacing(15)  # 设置垂直布局的间距
+        # 添加连接状态
+        self.connected = False
+        self.ui.StatusLabel.mousePressEvent = self.toggle_connection
         
-        # 设置按钮文本
-        self.ui.pushButton.setText("菜单")
-        self.ui.pushButton_2.setText("监控")
-        self.ui.pushButton_3.setText("控制")
-        self.ui.pushButton_8.setText("设置")
+        # 添加警告系统
+        self.warning_system = WarningSystem()
         
-        # 设置控制按钮
-        self.ui.pushButton_4.setText("加速")
-        self.ui.pushButton_5.setText("减速")
-        self.ui.pushButton_6.setText("停止")
-        self.ui.pushButton_7.setText("反向")
+        # 创建仪表盘和图表
+        self.position_dashboard = PositionDashBoard()
+        self.speed_dashboard = SpeedDashBoard()
+        self.power_dashboard = PowerDashBoard()
+        self.current_chart = CurrentLineChart()
         
-        # 调整顶部菜单栏
-        self.ui.menu.setMaximumHeight(60)
-        self.ui.menu.setStyleSheet("""
-            QFrame {
-                background-color: #1E88E5;
-                border-radius: 10px;
-            }
-        """)
+        # 替换原有的Widget
+        for widget, container in [
+            (self.position_dashboard, self.ui.PosDashboard),
+            (self.speed_dashboard, self.ui.SpeedDashboard),
+            (self.power_dashboard, self.ui.PowerDashboard),
+            (self.current_chart, self.ui.currentLineChart)
+        ]:
+            layout = container.layout()
+            if layout:
+                layout.addWidget(widget)
+            else:
+                layout = QtWidgets.QVBoxLayout(container)
+                layout.addWidget(widget)
+                layout.setContentsMargins(0, 0, 0, 0)
         
-        # 调整按钮位置和大小
-        for btn in [self.ui.pushButton, self.ui.pushButton_2, self.ui.pushButton_3]:
-            btn.setFixedSize(120, 40)
-            btn.setStyleSheet("""
-                QPushButton {
-                    background-color: #2196F3;
-                    color: white;
-                    border-radius: 5px;
-                    font-size: 14px;
-                    font-weight: bold;
-                }
-                QPushButton:hover {
-                    background-color: #1976D2;
-                }
-            """)
+        # 添加电机状态标志
+        self.motor_running = False
         
-        # 调整左侧边栏
-        self.ui.sidebar_2.setFixedWidth(250)
-        self.ui.sidebar_2.setStyleSheet("""
-            QFrame {
-                background-color: white;
-                border-radius: 10px;
-                border: 1px solid #E0E0E0;
-            }
-        """)
+        # 设置速度输入框验证器
+        speed_validator = QtGui.QDoubleValidator(-3000, 3000, 1)
+        self.ui.lineEdit.setValidator(speed_validator)
+        self.ui.lineEdit.setPlaceholderText("输入目标速度 (-3000 ~ 3000 rpm)")
         
-        # 创建状态显示区
-        self.status_text = QtWidgets.QLabel(self.ui.status)
-        self.status_text.setGeometry(QtCore.QRect(10, 10, 230, 60))
-        self.status_text.setText("系统状态: 正常")
-        self.status_text.setStyleSheet("""
-            QLabel {
-                background-color: #E8F5E9;
-                border: 1px solid #C8E6C9;
-                border-radius: 5px;
-                padding: 10px;
-                font-size: 13px;
-                font-weight: bold;
-            }
-        """)
-        
-        # 创建警告显示区
-        self.warning_text = QtWidgets.QTextEdit(self.ui.warnings)
-        self.warning_text.setGeometry(QtCore.QRect(10, 10, 230, 120))
-        self.warning_text.setReadOnly(True)
-        self.warning_text.setStyleSheet("""
-            QTextEdit {
-                background-color: #FFF3E0;
-                border: 1px solid #FFE0B2;
-                border-radius: 5px;
-                padding: 10px;
-                font-size: 12px;
-            }
-        """)
-        
-        # 创建数据表格
-        self.data_table = QtWidgets.QTableWidget(self.ui.real_time_table)
-        self.data_table.setGeometry(QtCore.QRect(0, 0, 700, 500))
-        self.data_table.setColumnCount(4)
-        self.data_table.setHorizontalHeaderLabels(['时间', 'ID', '数据', '解析'])
-        self.data_table.horizontalHeader().setSectionResizeMode(3, QtWidgets.QHeaderView.Stretch)
-        self.data_table.setStyleSheet("""
-            QTableWidget {
-                background-color: white;
-                border: 1px solid #E0E0E0;
-                border-radius: 8px;
-                padding: 5px;
-            }
-            QTableWidget::item {
-                padding: 8px;
-                border-bottom: 1px solid #F5F5F5;
-            }
-            QHeaderView::section {
-                background-color: #2196F3;
-                color: white;
-                padding: 8px;
-                border: none;
-                font-weight: bold;
-            }
-        """)
-        
-        # 添加页面标题
-        self.page_titles = {
-            0: "系统监控",
-            1: "电机控制",
-            2: "系统菜单"
-        }
-        
-        self.page_title = QtWidgets.QLabel(self.ui.mainbody)
-        self.page_title.setGeometry(QtCore.QRect(270, 10, 300, 40))
-        self.page_title.setStyleSheet("""
-            QLabel {
-                color: #1976D2;
-                font-size: 18px;
-                font-weight: bold;
-            }
-        """)
-        self.update_page_title(0)  # 设置初始标题
-        
-        # 添加状态更新动画
-        self.status_animation = QtCore.QPropertyAnimation(self.status_text, b"geometry")
-        self.status_animation.setDuration(200)
-        
-        # 添加数据更新提示
-        self.update_indicator = QtWidgets.QLabel(self.ui.mainbody)
-        self.update_indicator.setGeometry(QtCore.QRect(900, 10, 16, 16))
-        self.update_indicator.setStyleSheet("""
-            QLabel {
-                background-color: #4CAF50;
-                border-radius: 8px;
-            }
-        """)
-        self.update_indicator.hide()
+        # 添加回车键响应
+        self.ui.lineEdit.returnPressed.connect(lambda: self.send_control(CMD_SPEED_UP))
         
     def connect_signals(self):
         """连接信号和槽"""
         # 页面切换按钮
-        self.ui.pushButton.clicked.connect(lambda: self.ui.mainview.setCurrentIndex(2))  # 菜单页
-        self.ui.pushButton_2.clicked.connect(lambda: self.ui.mainview.setCurrentIndex(0))  # 监控页
-        self.ui.pushButton_3.clicked.connect(lambda: self.ui.mainview.setCurrentIndex(1))  # 控制页
+        self.ui.MenuButton.clicked.connect(lambda: self.ui.stackedWidget.setCurrentIndex(0))
+        self.ui.ViewButton.clicked.connect(lambda: self.ui.stackedWidget.setCurrentIndex(1))
+        self.ui.ContriolButton.clicked.connect(lambda: self.ui.stackedWidget.setCurrentIndex(2))
         
         # 控制按钮
-        self.ui.pushButton_4.clicked.connect(lambda: self.send_control(CMD_SPEED_UP))
-        self.ui.pushButton_5.clicked.connect(lambda: self.send_control(CMD_SPEED_DOWN))
-        self.ui.pushButton_6.clicked.connect(lambda: self.send_control(CMD_STOP))
-        self.ui.pushButton_7.clicked.connect(lambda: self.send_control(CMD_REVERSE))
+        self.ui.controlButton_acc.clicked.connect(lambda: self.send_control(CMD_SPEED_UP))
+        self.ui.pushButton_7.clicked.connect(lambda: self.send_control(CMD_SPEED_DOWN))
+        self.ui.pushButton_6.clicked.connect(self.toggle_motor)
+        self.ui.pushButton_8.clicked.connect(lambda: self.send_control(CMD_REVERSE))
         
-        # 设置按钮
-        self.ui.pushButton_8.clicked.connect(self.show_settings)
+        # 警告设置按钮
+        self.ui.WarningSetting.clicked.connect(self.show_warning_settings)
+        self.ui.WarningHis.clicked.connect(self.show_warning_history)
         
-        # 添加页面切换标题更新
-        self.ui.mainview.currentChanged.connect(self.update_page_title)
+    def init_tables(self):
+        """初始化表格"""
+        # 警告表格
+        self.ui.warningTable.setColumnCount(2)
+        self.ui.warningTable.setHorizontalHeaderLabels(['类型', '时间'])
+        self.ui.warningTable.horizontalHeader().setSectionResizeMode(
+            QtWidgets.QHeaderView.Stretch)
+            
+        # 数据表格
+        self.ui.tableWidget.setColumnCount(2)
+        self.ui.tableWidget.setHorizontalHeaderLabels(['位置', '速度'])
+        self.ui.tableWidget.horizontalHeader().setSectionResizeMode(
+            QtWidgets.QHeaderView.Stretch)
+            
+        # 设置定时更新
+        self.update_timer = QTimer()
+        self.update_timer.timeout.connect(self.update_table_data)
+        self.update_timer.start(1000)  # 1秒更新一次
+        
+        # 存储最新数据
+        self.current_position = 0
+        self.current_speed = 0
         
     def poll_messages(self):
         """轮询CAN消息"""
@@ -203,85 +131,410 @@ class MainQtWindow(QtWidgets.QMainWindow):
             
     def update_display(self, msg):
         """更新显示"""
-        # 更新表格
-        time_str = datetime.now().strftime('%H:%M:%S.%f')[:-3]
-        data_str = ' '.join(f'{b:02X}' for b in msg.data)
-        parsed_str = self.parse_message(msg)
-        
-        row = self.data_table.rowCount()
-        self.data_table.insertRow(0)
-        self.data_table.setItem(0, 0, QtWidgets.QTableWidgetItem(time_str))
-        self.data_table.setItem(0, 1, QtWidgets.QTableWidgetItem(f'{msg.arbitration_id:X}'))
-        self.data_table.setItem(0, 2, QtWidgets.QTableWidgetItem(data_str))
-        self.data_table.setItem(0, 3, QtWidgets.QTableWidgetItem(parsed_str))
-        
-        # 限制表格行数
-        if self.data_table.rowCount() > 100:
-            self.data_table.removeRow(self.data_table.rowCount() - 1)
-            
-        # 显示更新指示器
-        self.update_indicator.show()
-        QtCore.QTimer.singleShot(100, self.update_indicator.hide)
-        
-    def parse_message(self, msg):
-        """解析CAN消息"""
         try:
             import struct
-            data = bytes(msg.data)
+            data = bytes(msg.data[:-4])  # 去掉帧尾
             
-            if msg.arbitration_id == CAN_ID_CURRENT:
-                ia = struct.unpack('<f', data[0:4])[0]
-                ib = struct.unpack('<f', data[4:8])[0]
-                ic = struct.unpack('<f', data[8:12])[0]
-                return f"Ia={ia:.1f}A, Ib={ib:.1f}A, Ic={ic:.1f}A"
-                
-            elif msg.arbitration_id == CAN_ID_SPEED:
-                speed_ref = struct.unpack('<f', data[0:4])[0]
-                speed_actual = struct.unpack('<f', data[4:8])[0]
-                return f"Speed={speed_actual:.0f}rpm, Target={speed_ref:.0f}rpm"
-                
-            elif msg.arbitration_id == CAN_ID_POSITION:
-                position = struct.unpack('<f', data[0:4])[0]
-                angle = position * 360.0 / 8192
-                return f"Position={position:.0f}, Angle={angle:.1f}°"
-                
+            # 解析所有数据
+            ia = struct.unpack('<f', data[0:4])[0]
+            ib = struct.unpack('<f', data[4:8])[0]
+            ic = struct.unpack('<f', data[8:12])[0]
+            speed_ref = struct.unpack('<f', data[12:16])[0]
+            speed_actual = struct.unpack('<f', data[16:20])[0]
+            position = struct.unpack('<f', data[20:24])[0]
+            
+            # 更新显示
+            self.update_current_info(ia, ib, ic)
+            self.update_speed_info(speed_ref, speed_actual)
+            self.update_position_info(position)
+            
+            # 检查警告
+            warnings = self.warning_system.check_warnings(ia, ib, ic, speed_actual)
+            if warnings:
+                self.update_warning_table(warnings)
+            
         except Exception as e:
             print(f"解析错误: {str(e)}")
-        return "Unknown message"
+            
+    def update_current_info(self, ia, ib, ic):
+        """更新电流信息"""
+        info = f"Ia={ia:.1f}A\nIb={ib:.1f}A\nIc={ic:.1f}A"
+        self.ui.textBrowser_2.setText(info)
         
+        # 更新电流图表
+        self.current_chart.update_current(ia, ib, ic)
+        
+        # 计算功率并更新功率仪表盘
+        voltage = 24.0  # 假设电压为24V
+        current_rms = math.sqrt((ia*ia + ib*ib + ic*ic) / 3)
+        power = voltage * current_rms
+        self.power_dashboard.update_value(power)
+        
+    def update_speed_info(self, speed_ref, speed_actual):
+        """更新速度信息"""
+        self.current_speed = speed_actual
+        # 更新仪表盘
+        self.speed_dashboard.update_value(speed_actual)
+        
+    def update_position_info(self, position):
+        """更新位置信息"""
+        self.current_position = position * 360.0 / 8192
+        # 更新仪表盘
+        self.position_dashboard.update_value(self.current_position)
+        
+    def update_table_data(self):
+        """定时更新表格数据"""
+        time_str = datetime.now().strftime('%H:%M:%S')
+        
+        # 插入新行
+        self.ui.tableWidget.insertRow(0)
+        self.ui.tableWidget.setVerticalHeaderItem(0, QtWidgets.QTableWidgetItem(time_str))
+        
+        # 设置数据
+        self.ui.tableWidget.setItem(0, 0, QtWidgets.QTableWidgetItem(f"{self.current_position:.1f}°"))
+        self.ui.tableWidget.setItem(0, 1, QtWidgets.QTableWidgetItem(f"{self.current_speed:.0f}"))
+        
+        # 限制最大行数为10
+        while self.ui.tableWidget.rowCount() > 15:
+            self.ui.tableWidget.removeRow(15)
+        
+    def toggle_motor(self):
+        """切换电机启停状态"""
+        if self.motor_running:
+            self.send_control(CMD_STOP)
+            self.motor_running = False
+            self.ui.pushButton_6.setText("⏵ Start")  # 使用播放图标
+            self.ui.pushButton_6.setStyleSheet("""
+                QPushButton {
+                    background-color: #4CAF50;
+                    color: white;
+                    border: 1px solid #CCCCCC;
+                    border-radius: 10px;
+                    padding: 5px;
+                    font-size: 15pt;
+                }
+                QPushButton:hover {
+                    background-color: #45a049;
+                }
+                QPushButton:pressed {
+                    background-color: #398038;
+                }
+            """)
+        else:
+            self.send_control(CMD_START)
+            self.motor_running = True
+            self.ui.pushButton_6.setText("⏻ Stop")  # 使用停止图标
+            self.ui.pushButton_6.setStyleSheet("""
+                QPushButton {
+                    background-color: #f44336;
+                    color: white;
+                    border: 1px solid #CCCCCC;
+                    border-radius: 10px;
+                    padding: 5px;
+                    font-size: 15pt;
+                }
+                QPushButton:hover {
+                    background-color: #da190b;
+                }
+                QPushButton:pressed {
+                    background-color: #d32f2f;
+                }
+            """)
+            
     def send_control(self, cmd):
         """发送控制命令"""
         try:
+            if cmd == CMD_SPEED_UP:
+                if self.ui.lineEdit.text():  # 如果有输入具体速度
+                    try:
+                        target_speed = float(self.ui.lineEdit.text())
+                        # 限制速度范围在 ±1000 rpm
+                        target_speed = max(min(target_speed, 1000), -1000)
+                    except ValueError:
+                        QtWidgets.QMessageBox.warning(self, "警告", "请输入有效的数字!")
+                        return
+                else:  # 没有输入则默认加速500rpm
+                    current_speed = self.current_speed
+                    target_speed = min(current_speed + 500, 1000)
+                    
+            elif cmd == CMD_SPEED_DOWN:  # 减速
+                current_speed = self.current_speed
+                target_speed = max(current_speed - 500, -1000)
+                
+            elif cmd == CMD_STOP:  # 停止
+                target_speed = 0.0
+                
+            elif cmd == CMD_START:  # 启动
+                # 如果有输入速度，使用输入值作为启动速度
+                if self.ui.lineEdit.text():
+                    try:
+                        target_speed = float(self.ui.lineEdit.text())
+                        target_speed = max(min(target_speed, 1000), -1000)
+                    except ValueError:
+                        target_speed = 500.0  # 默认启动速度
+                else:
+                    target_speed = 500.0  # 默认启动速度
+                print(f"电机启动，目标速度: {target_speed} rpm")
+                
+            elif cmd == CMD_REVERSE:  # 反转
+                target_speed = -self.current_speed
+            
+            # 打包命令数据
+            import struct
+            data = bytearray()
+            data.append(cmd)  # 命令类型 (1字节)
+            data.extend(struct.pack('<f', target_speed))  # 目标速度 (4字节)
+            data.extend([0] * 3)  # 填充字节 (3字节)
+            
+            print(f"发送控制命令: {cmd}, 目标速度: {target_speed} rpm")
+            
+            # 发送消息
             msg = VirtualCANMessage(
                 arbitration_id=CAN_ID_CONTROL,
-                data=[cmd, 0, 0, 0, 0, 0, 0, 0]
+                data=list(data)  # 转换为列表
             )
             self.can_bus.send(msg)
+            
+            # 清空输入框
+            self.ui.lineEdit.clear()
+            
         except Exception as e:
             QtWidgets.QMessageBox.critical(self, "错误", f"发送失败: {str(e)}")
             
-    def show_settings(self):
-        """显示设置对话框"""
-        # TODO: 实现设置对话框
-        QtWidgets.QMessageBox.information(self, "提示", "设置功能开发中...")
+    def show_warning_settings(self):
+        """显示警告设置对话框"""
+        dialog = WarningSettingsDialog(self.warning_system, self)
+        dialog.exec_()
+        
+    def show_warning_history(self):
+        """显示警告历史对话框"""
+        dialog = WarningHistoryDialog(self.warning_system, self)
+        dialog.exec_()
 
-    def update_page_title(self, index):
-        """更新页面标题"""
-        self.page_title.setText(self.page_titles.get(index, ""))
+    def toggle_connection(self, event):
+        """切换连接状态"""
+        try:
+            if not self.connected:
+                # 尝试连接
+                if self.can_bus.connect():
+                    self.connected = True
+                    self.ui.StatusLabel.setText("☰ Connected")
+                    self.ui.StatusLabel.setStyleSheet("""
+                        QLabel {
+                            background-color: #4CAF50;
+                            color: white;
+                            text-align: center;
+                            padding: 5px;
+                            font-size: 20pt;
+                            border-radius: 5px;
+                        }
+                    """)
+                    # 启动数据更新和模拟器
+                    self.timer.start()
+                    self.update_timer.start()
+                    if not self.simulator:
+                        self.simulator = MotorSimulator(self.can_bus)
+                    self.simulator.start_simulation()
+            else:
+                # 断开连接
+                if self.can_bus.disconnect():
+                    self.connected = False
+                    self.ui.StatusLabel.setText("☰ Disconnected")
+                    self.ui.StatusLabel.setStyleSheet("""
+                        QLabel {
+                            background-color: #F44336;
+                            color: white;
+                            text-align: center;
+                            padding: 5px;
+                            font-size: 20pt;
+                            border-radius: 5px;
+                        }
+                    """)
+                    # 停止数据更新和模拟器
+                    self.timer.stop()
+                    self.update_timer.stop()
+                    if self.simulator:
+                        self.simulator.stop_simulation()
+        except Exception as e:
+            QtWidgets.QMessageBox.critical(self, "错误", f"连接操作失败: {str(e)}")
+
+    def setup_icons(self):
+        """设置所有图标"""
+        # 设置Logo和图片
+        try:
+            # 使用绝对路径
+            base_dir = os.path.dirname(os.path.abspath(__file__))
+            logo_path = os.path.join(base_dir, "static", "logo.png")
+            pic_path = os.path.join(base_dir, "static", "pic.png")
+            
+            # 检查文件是否存在
+            if not os.path.exists(logo_path):
+                print(f"Warning: Logo file not found at {logo_path}")
+                return
+            if not os.path.exists(pic_path):
+                print(f"Warning: Picture file not found at {pic_path}")
+                return
+            
+            # 方法1：直接设置Label的固定大小
+            self.ui.label.setFixedSize(100, 100)      # Logo大小
+            self.ui.label_5.setFixedSize(200, 200)    # Picture大小
+            self.ui.label_2.setFixedSize(200, 200)    # Picture大小
+            
+            # 方法2：手动指定图片缩放大小
+            logo_pixmap = QtGui.QPixmap(logo_path).scaled(
+                150, 150,  # 指定具体的宽度和高度
+                QtCore.Qt.KeepAspectRatio,
+                QtCore.Qt.SmoothTransformation
+            )
+            pic_pixmap = QtGui.QPixmap(pic_path).scaled(
+                200, 200,  # 指定具体的宽度和高度
+                QtCore.Qt.KeepAspectRatio,
+                QtCore.Qt.SmoothTransformation
+            )
+            
+            # 设置图片
+            self.ui.label.setPixmap(logo_pixmap)
+            self.ui.label_5.setPixmap(pic_pixmap)
+            self.ui.label_2.setPixmap(pic_pixmap)
+            
+            # 可选：设置对齐方式
+            self.ui.label.setAlignment(QtCore.Qt.AlignCenter)
+            self.ui.label_5.setAlignment(QtCore.Qt.AlignCenter)
+            self.ui.label_2.setAlignment(QtCore.Qt.AlignCenter)
+            # 设置是否自适应大小（如果设为True，图片会填充整个Label）
+            self.ui.label.setScaledContents(False)  # 改为False以使用固定大小
+            self.ui.label_5.setScaledContents(False)
+            self.ui.label_2.setScaledContents(False)
+
+        except Exception as e:
+            print(f"Error loading images: {str(e)}")
+        
+        # 菜单按钮图标
+        self.ui.MenuButton.setText("☰ Menu")        # fa-ellipsis-v
+        self.ui.ViewButton.setText("📊 View")        # fa-bar-chart
+        self.ui.ContriolButton.setText("⬆ Control") # fa-upload
+        
+        # 控制按钮图标
+        self.ui.controlButton_acc.setText("⏩ Accelerate")    # fa-toggle-right
+        self.ui.pushButton_7.setText("⏪ Decelerate")        # fa-toggle-left
+        self.ui.pushButton_8.setText("↩ Turnover")          # fa-reply
+        self.ui.pushButton_6.setText("⏻ Stop")              # fa-power-off
+        
+        # 设置按钮图标
+        self.ui.WarningSetting.setText("⚙ Settings")        # fa-cog
+        self.ui.WarningHis.setText("⟲ History")            # fa-history
+        
+        # 标签图标
+        self.ui.StatusLabel.setText("☰ Disconnected")
+        self.ui.StatusLabel.setStyleSheet("""
+            QLabel {
+                background-color: #F44336;
+                color: white;
+                text-align: center;
+                padding: 5px;
+                font-size: 20pt;
+                border-radius: 5px;
+                cursor: pointer;
+            }
+        """)
+        self.ui.StatusLabel.setCursor(QtCore.Qt.PointingHandCursor)  # 设置鼠标指针样式
+        
+        # 统一设置按钮样式
+        buttons = [
+            self.ui.MenuButton, self.ui.ViewButton, self.ui.ContriolButton,
+            self.ui.controlButton_acc, self.ui.pushButton_7, self.ui.pushButton_8,
+            self.ui.pushButton_6, self.ui.WarningSetting, self.ui.WarningHis
+        ]
+        
+        for button in buttons:
+            button.setStyleSheet("""
+                QPushButton {
+                    background-color: white;
+                    color: black;
+                    border: 1px solid #CCCCCC;
+                    border-radius: 10px;
+                    padding: 5px;
+                    font-size: 15pt;
+                }
+                QPushButton:hover {
+                    background-color: #E0E0E0;
+                }
+                QPushButton:pressed {
+                    background-color: #50B56A;
+                    color: white;
+                }
+            """)
+        
+        # 设置标签样式
+        self.ui.StatusLabel.setStyleSheet("""
+            QLabel {
+                background-color: #4362F0;
+                color: white;
+                text-align: center;
+                padding: 5px;
+                font-size: 20pt;
+                border-radius: 5px;
+            }
+        """)
+
+    def update_warning_table(self, warnings):
+        """更新警告表格"""
+        time_str = datetime.now().strftime('%m-%d %H:%M:%S')
+        
+        for warning in warnings:  # warnings现在只包含新警告
+            # 检查是否已存在相同类型的警告
+            existing_row = -1
+            for row in range(self.ui.warningTable.rowCount()):
+                item = self.ui.warningTable.item(row, 0)
+                if item and item.text() == warning.value:
+                    existing_row = row
+                    break
+            
+            if existing_row >= 0:
+                # 更新已存在警告的时间
+                self.ui.warningTable.setItem(existing_row, 1, 
+                    QtWidgets.QTableWidgetItem(time_str))
+                # 移动到表格顶部
+                self.ui.warningTable.removeRow(existing_row)
+                self.ui.warningTable.insertRow(0)
+                self.ui.warningTable.setItem(0, 0, 
+                    QtWidgets.QTableWidgetItem(warning.value))
+                self.ui.warningTable.setItem(0, 1, 
+                    QtWidgets.QTableWidgetItem(time_str))
+            else:
+                # 添加新警告到顶部
+                self.ui.warningTable.insertRow(0)
+                self.ui.warningTable.setItem(0, 0, 
+                    QtWidgets.QTableWidgetItem(warning.value))
+                self.ui.warningTable.setItem(0, 1, 
+                    QtWidgets.QTableWidgetItem(time_str))
+            
+            # 设置单元格对齐方式
+            for col in range(2):
+                item = self.ui.warningTable.item(0, col)
+                if item:
+                    item.setTextAlignment(Qt.AlignCenter)
+        
+        # 限制警告表格最大行数
+        while self.ui.warningTable.rowCount() > 100:  # 保留最近100条警告
+            self.ui.warningTable.removeRow(100)
 
 def main():
     app = QtWidgets.QApplication(sys.argv)
     
-    # 创建CAN总线和模拟器
-    bus = VirtualCANBus()
-    simulator = MotorSimulator(bus)
+    # 根据配置选择CAN总线类型
+    USE_VIRTUAL_CAN = True  # 可以通过配置文件或命令行参数设置
+    
+    if USE_VIRTUAL_CAN:
+        bus = VirtualCANBus()
+        simulator = MotorSimulator(bus)
+    else:
+        bus = RealCANBus(channel='can0', bitrate=500000)
+        simulator = None  # 真实CAN不需要模拟器
     
     # 创建主窗口
     window = MainQtWindow(bus)
     window.show()
-    
-    # 启动模拟器
-    simulator.start_simulation()
     
     sys.exit(app.exec_())
 

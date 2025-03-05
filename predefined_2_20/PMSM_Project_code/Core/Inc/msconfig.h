@@ -1,0 +1,20 @@
+#ifndef MSCONFIG_H_
+#define	MSCONFIG_H_
+
+#define	DIR_POSTIVE				1
+#define	DIR_NEGTIVE				-1
+
+#define	SPD_SAMPLE_FREQ			500
+#define	PWM_PERIOD_CYCLES		7200
+#define	PWM_PERIOD_CYCLES_HALF	(PWM_PERIOD_CYCLES/2)
+
+#define	MAX_CLOSELOOP_SPD		2000	// 2000rpm
+#define	MIN_CLOSELOOP_SPD		100		// 100rpm
+#define	MIN_HALL_SPD_TG5P60		150		// 150rpm
+#define	MIN_HALL_SPD_JSF630		150		// 150rpm
+#define	MIN_HALL_SPD_TB2P		150		// 150rpm
+#define	MIN_STO_SPD				750		// 750rpm
+#define MC_PI					3.14159265358979323846
+
+#endif
+

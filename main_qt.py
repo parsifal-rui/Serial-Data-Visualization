@@ -5,6 +5,7 @@ import sys
 import time
 import os
 import math
+import numpy as np
 
 # 添加字体图标支持
 from PyQt5.QtGui import QFontDatabase, QFont
@@ -127,60 +128,37 @@ class MainQtWindow(QtWidgets.QMainWindow):
         """轮询CAN消息"""
         msg = self.can_bus.recv(timeout=0)
         if msg:
-            self.update_display(msg)
+            addr, value = self.can_bus.parse_message(msg)
+            if addr is not None:
+                self.can_bus.update_motor_data(addr, value)
+                self.update_display()
             
-    def update_display(self, msg):
+    def update_display(self):
         """更新显示"""
-        try:
-            import struct
-            data = bytes(msg.data[:-4])  # 去掉帧尾
-            
-            # 解析所有数据
-            ia = struct.unpack('<f', data[0:4])[0]
-            ib = struct.unpack('<f', data[4:8])[0]
-            ic = struct.unpack('<f', data[8:12])[0]
-            speed_ref = struct.unpack('<f', data[12:16])[0]
-            speed_actual = struct.unpack('<f', data[16:20])[0]
-            position = struct.unpack('<f', data[20:24])[0]
-            
-            # 更新显示
-            self.update_current_info(ia, ib, ic)
-            self.update_speed_info(speed_ref, speed_actual)
-            self.update_position_info(position)
-            
-            # 检查警告
-            warnings = self.warning_system.check_warnings(ia, ib, ic, speed_actual)
-            if warnings:
-                self.update_warning_table(warnings)
-            
-        except Exception as e:
-            print(f"解析错误: {str(e)}")
-            
-    def update_current_info(self, ia, ib, ic):
-        """更新电流信息"""
-        info = f"Ia={ia:.1f}A\nIb={ib:.1f}A\nIc={ic:.1f}A"
-        self.ui.textBrowser_2.setText(info)
+        data = self.can_bus.data
+        
+        # 更新电流信息
+        current_info = (f"Ia={data.ia:.1f}A\n"
+                       f"Ib={data.ib:.1f}A\n"
+                       f"Ic={data.ic:.1f}A\n"
+                       f"Id={data.id:.1f}A\n"
+                       f"Iq={data.iq:.1f}A")
+        self.ui.textBrowser_2.setText(current_info)
         
         # 更新电流图表
-        self.current_chart.update_current(ia, ib, ic)
+        self.current_chart.update_current(data.ia, data.ib, data.ic)
         
-        # 计算功率并更新功率仪表盘
+        # 更新速度信息
+        self.speed_dashboard.update_value(data.speed_fed)
+        
+        # 更新位置信息
+        angle = data.position * 360.0 / 8192
+        self.position_dashboard.update_value(angle)
+        
+        # 计算功率
         voltage = 24.0  # 假设电压为24V
-        current_rms = math.sqrt((ia*ia + ib*ib + ic*ic) / 3)
-        power = voltage * current_rms
+        power = abs(data.speed_fed * 2 * np.pi / 60) * abs(data.iq) * voltage
         self.power_dashboard.update_value(power)
-        
-    def update_speed_info(self, speed_ref, speed_actual):
-        """更新速度信息"""
-        self.current_speed = speed_actual
-        # 更新仪表盘
-        self.speed_dashboard.update_value(speed_actual)
-        
-    def update_position_info(self, position):
-        """更新位置信息"""
-        self.current_position = position * 360.0 / 8192
-        # 更新仪表盘
-        self.position_dashboard.update_value(self.current_position)
         
     def update_table_data(self):
         """定时更新表格数据"""
@@ -244,59 +222,45 @@ class MainQtWindow(QtWidgets.QMainWindow):
     def send_control(self, cmd):
         """发送控制命令"""
         try:
+            # 根据命令类型构造对应的字符串命令
+            command = None
             if cmd == CMD_SPEED_UP:
                 if self.ui.lineEdit.text():  # 如果有输入具体速度
                     try:
                         target_speed = float(self.ui.lineEdit.text())
-                        # 限制速度范围在 ±1000 rpm
-                        target_speed = max(min(target_speed, 1000), -1000)
+                        # 限制速度范围
+                        target_speed = max(min(target_speed, MAX_SPEED), MIN_SPEED)
+                        command = f"SPD {target_speed:.0f}"
                     except ValueError:
                         QtWidgets.QMessageBox.warning(self, "警告", "请输入有效的数字!")
                         return
-                else:  # 没有输入则默认加速500rpm
-                    current_speed = self.current_speed
-                    target_speed = min(current_speed + 500, 1000)
-                    
-            elif cmd == CMD_SPEED_DOWN:  # 减速
-                current_speed = self.current_speed
-                target_speed = max(current_speed - 500, -1000)
-                
-            elif cmd == CMD_STOP:  # 停止
-                target_speed = 0.0
-                
-            elif cmd == CMD_START:  # 启动
-                # 如果有输入速度，使用输入值作为启动速度
-                if self.ui.lineEdit.text():
-                    try:
-                        target_speed = float(self.ui.lineEdit.text())
-                        target_speed = max(min(target_speed, 1000), -1000)
-                    except ValueError:
-                        target_speed = 500.0  # 默认启动速度
                 else:
-                    target_speed = 500.0  # 默认启动速度
-                print(f"电机启动，目标速度: {target_speed} rpm")
+                    # 保持ACCE前缀，但添加默认增量
+                    command = "ACCE 100"  # 默认加速100rpm
+            elif cmd == CMD_SPEED_DOWN:
+                command = "DECE 100"  # 默认减速100rpm
+            elif cmd == CMD_STOP:
+                command = "MOT OFF"
+            elif cmd == CMD_START:
+                command = "MOT ON"
+            elif cmd == CMD_REVERSE:
+                command = "DIR REV"
+            else:
+                QtWidgets.QMessageBox.warning(self, "警告", "未知的命令类型!")
+                return
+
+            if command:
+                # 创建并发送消息
+                msg = VirtualCANMessage(
+                    arbitration_id=CAN_ID_CONTROL,
+                    data=command.encode('ascii')  # 将字符串转换为字节数组
+                )
+                self.can_bus.send(msg)
                 
-            elif cmd == CMD_REVERSE:  # 反转
-                target_speed = -self.current_speed
-            
-            # 打包命令数据
-            import struct
-            data = bytearray()
-            data.append(cmd)  # 命令类型 (1字节)
-            data.extend(struct.pack('<f', target_speed))  # 目标速度 (4字节)
-            data.extend([0] * 3)  # 填充字节 (3字节)
-            
-            print(f"发送控制命令: {cmd}, 目标速度: {target_speed} rpm")
-            
-            # 发送消息
-            msg = VirtualCANMessage(
-                arbitration_id=CAN_ID_CONTROL,
-                data=list(data)  # 转换为列表
-            )
-            self.can_bus.send(msg)
-            
-            # 清空输入框
-            self.ui.lineEdit.clear()
+                # 清空输入框
+                self.ui.lineEdit.clear()
+                
+                print(f"发送控制命令: {command}")
             
         except Exception as e:
             QtWidgets.QMessageBox.critical(self, "错误", f"发送失败: {str(e)}")
@@ -518,6 +482,33 @@ class MainQtWindow(QtWidgets.QMainWindow):
         # 限制警告表格最大行数
         while self.ui.warningTable.rowCount() > 100:  # 保留最近100条警告
             self.ui.warningTable.removeRow(100)
+
+    def send_motor_command(self, cmd_type: int, value: float = 0.0):
+        """发送电机控制命令"""
+        if not self.can_bus.is_connected:
+            self.show_message("错误", "请先连接CAN设备")
+            return
+        
+        if self.can_bus.send_control_command(cmd_type, value):
+            self.show_message("成功", "命令已发送")
+        else:
+            self.show_message("错误", "命令发送失败")
+
+    def on_start_clicked(self):
+        """启动电机"""
+        self.send_motor_command(CMD_START)
+
+    def on_stop_clicked(self):
+        """停止电机"""
+        self.send_motor_command(CMD_STOP)
+
+    def on_speed_set_clicked(self):
+        """设置速度"""
+        try:
+            speed = float(self.speed_input.text())
+            self.send_motor_command(CMD_SPEED_SET, speed)
+        except ValueError:
+            self.show_message("错误", "请输入有效的速度值")
 
 def main():
     app = QtWidgets.QApplication(sys.argv)

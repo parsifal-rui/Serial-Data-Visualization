@@ -1,0 +1,41 @@
+#ifndef KEY_PROCESS_H_
+#define	KEY_PROCESS_H_
+
+#define	KEY_RUN_PIN		GPIO_PIN_3
+#define	KEY_STOP_PIN	GPIO_PIN_4
+#define	KEY_UP_PIN		GPIO_PIN_5
+#define	KEY_DOWN_PIN	GPIO_PIN_1
+#define	KEY_DIR_PIN		GPIO_PIN_11
+
+#define	KEY_RUN_GPIO_PORT	((GPIO_TypeDef *)GPIOA)
+#define	KEY_STOP_GPIO_PORT	((GPIO_TypeDef *)GPIOA)
+#define	KEY_UP_GPIO_PORT	((GPIO_TypeDef *)GPIOA)
+#define	KEY_DOWN_GPIO_PORT	((GPIO_TypeDef *)GPIOB)
+#define	KEY_DIR_GPIO_PORT	((GPIO_TypeDef *)GPIOB)
+
+enum
+{
+	KEY_RUN_NONE = 0,
+	KEY_RUN_DOWN,
+	KEY_RUN_UP,
+	KEY_STOP_NONE,
+	KEY_STOP_DOWN,
+	KEY_STOP_UP,
+	KEY_UP_NONE,
+	KEY_UP_DOWN,
+	KEY_UP_UP,
+	KEY_DOWN_NONE,
+	KEY_DOWN_DOWN,
+	KEY_DOWN_UP,
+	KEY_DIR_NONE,
+	KEY_DIR_DOWN,
+	KEY_DIR_UP,
+	KEY_MAX_NONE,
+};
+
+void KeyProcInit(void);
+uint8_t KeyGetKeyValue(void);
+void KeyProcess(void);
+
+#endif
+

@@ -4,11 +4,65 @@ from queue import Queue, Empty
 import math
 import threading
 from utils.constants import *
+import struct
+import numpy as np
+from typing import Optional
+from dataclasses import dataclass
+from can_constants import *  # 导入所有 CAN 常量
+
+@dataclass
+class MotorData:
+    """电机数据结构"""
+    ia: float = 0.0
+    ib: float = 0.0
+    ic: float = 0.0
+    id: float = 0.0
+    iq: float = 0.0
+    speed_ref: float = 0.0
+    speed_fed: float = 0.0
+    position: int = 0
+
+@dataclass
+class VirtualCANMessage:
+    """虚拟CAN消息类"""
+    arbitration_id: int
+    data: bytes
+    dlc: int = 8
+    is_extended_id: bool = False
+    
+    def __init__(self, arbitration_id: int, data: bytes, dlc: int = 8, is_extended_id: bool = False):
+        self.arbitration_id = arbitration_id
+        self.data = data
+        self.dlc = dlc
+        self.is_extended_id = is_extended_id
+        
+        # 根据消息ID进行数据验证
+        if arbitration_id == CAN_ID_CONTROL:
+            if len(data) < 5:  # 至少需要5字节：1字节命令类型 + 4字节浮点数
+                raise ValueError("控制命令数据长度不足")
+        else:
+            if len(data) < 4:  # 其他消息至少需要4字节数据
+                raise ValueError("数据长度不足")
 
 class VirtualCANBus:
     def __init__(self):
         self.queue = Queue()
         self.is_connected = False
+        
+        # 初始化电机数据
+        self.data = MotorData()
+        
+        # 地址映射
+        self.addr_map = {
+            CAN_ID_IA: ('ia', 'f'),        # Ia 电流
+            CAN_ID_IB: ('ib', 'f'),        # Ib 电流
+            CAN_ID_IC: ('ic', 'f'),        # Ic 电流
+            CAN_ID_ID: ('id', 'f'),        # Id 电流
+            CAN_ID_IQ: ('iq', 'f'),        # Iq 电流
+            CAN_ID_SPEED_REF: ('speed_ref', 'f'),  # 速度参考值
+            CAN_ID_SPEED_FED: ('speed_fed', 'f'),  # 速度反馈值
+            CAN_ID_POSITION: ('position', 'h')      # 位置反馈值
+        }
         
     def connect(self):
         """连接CAN总线"""
@@ -40,61 +94,59 @@ class VirtualCANBus:
             return self.queue.get(timeout=timeout if timeout else 0)
         except Empty:
             return None
-
-class VirtualCANMessage:
-    def __init__(self, arbitration_id, data, dlc=None, is_extended_id=False):
-        self.arbitration_id = arbitration_id
-        
-        # 统一处理命令消息和数据消息
-        if arbitration_id == CAN_ID_CONTROL:
-            # 控制命令格式：[cmd, speed_bytes(4), padding(3)]
-            if isinstance(data, (list, bytearray)):
-                self.data = list(data)  # 直接使用传入的字节列表
-            else:
-                self.data = data
-        else:
-            # VOFA数据格式
-            if isinstance(data, list) and isinstance(data[0], float):
-                self.data = self._pack_float_data(data)
-            else:
-                self.data = data
+            
+    def parse_message(self, msg: VirtualCANMessage) -> tuple[Optional[int], Optional[float]]:
+        """
+        解析CAN消息
+        :param msg: CAN消息
+        :return: (地址, 值)的元组
+        """
+        try:
+            addr = msg.arbitration_id
+            if addr not in self.addr_map:
+                return None, None
                 
-        self.dlc = dlc or len(self.data)
-        self.is_extended_id = is_extended_id
-        self.timestamp = time.time()
-        
-    def _pack_float_data(self, float_list):
-        """将浮点数列表打包为vofa格式"""
-        import struct
-        data = bytearray()
-        for value in float_list:
-            data.extend(struct.pack('<f', float(value)))
-        # 添加VOFA帧尾
-        data.extend([0x00, 0x00, 0x80, 0x7F])
-        return list(data)
+            attr_name, data_type = self.addr_map[addr]
+            
+            # 根据数据类型解析
+            if data_type == 'h':  # short类型
+                value = struct.unpack('<h', msg.data[:2])[0]
+            else:  # float类型
+                value = struct.unpack('<f', msg.data[:4])[0]
+                
+            return addr, value
+            
+        except Exception as e:
+            print(f"解析消息失败: {str(e)}")
+            return None, None
+
+    def update_motor_data(self, addr: int, value: float) -> bool:
+        """
+        更新电机数据
+        :param addr: 数据地址
+        :param value: 数据值
+        :return: 是否更新成功
+        """
+        try:
+            if addr in self.addr_map:
+                attr_name, _ = self.addr_map[addr]
+                setattr(self.data, attr_name, value)
+                return True
+            return False
+        except Exception as e:
+            print(f"更新数据失败: {str(e)}")
+            return False
 
 class MotorSimulator:
     def __init__(self, can_bus):
         self.can_bus = can_bus
         self.running = False
-        self.thread = None
         
         # 基本参数
         self.phase = 0
         self.speed_ref = 0
         self.speed_actual = 0
-        self.total_angle = 0
-        
-        # 异常模拟参数
-        self.fault_mode = 0  # 0: 正常, 1: 过流, 2: 欠流, 3: 超速, 4: 功率过大
-        self.fault_counter = 0
-        self.fault_duration = 100  # 故障持续时间(循环次数)
-        self.fault_interval = 500  # 故障间隔时间(循环次数)
-        
-        # 噪声参数
-        self.current_noise = 0.2
-        self.speed_noise = 5
-        self.position_noise = 0.1
+        self.position = 0
         
     def start_simulation(self):
         """启动模拟器"""
@@ -109,101 +161,49 @@ class MotorSimulator:
         self.speed_ref = min(max(speed, -MAX_SPEED), MAX_SPEED)
         
     def simulate_data(self):
-        """模拟电机数据"""
-        while self.running:
-            current_time = time.time()
+        """模拟生成电机数据"""
+        while True:
+            # 模拟电流数据
+            ia = random.uniform(-10, 10)
+            ib = random.uniform(-10, 10)
+            ic = random.uniform(-10, 10)
+            id = random.uniform(-10, 10)
+            iq = random.uniform(-10, 10)
             
-            # 检查是否有新的控制命令
-            control_msg = self.can_bus.recv(timeout=0)
-            if control_msg and control_msg.arbitration_id == CAN_ID_CONTROL:
-                try:
-                    # 解析控制命令
-                    import struct
-                    cmd = control_msg.data[0]  # 第一个字节是命令类型
-                    # 确保数据长度足够
-                    if len(control_msg.data) >= 5:  # 至少需要5个字节(1字节命令 + 4字节浮点数)
-                        target_speed = struct.unpack('<f', bytes(control_msg.data[1:5]))[0]
-                        
-                        # 更新目标速度
-                        self.speed_ref = target_speed
-                        
-                        # 打印命令信息
-                        cmd_names = {
-                            CMD_START: "启动",
-                            CMD_STOP: "停止",
-                            CMD_SPEED_UP: "加速",
-                            CMD_SPEED_DOWN: "减速",
-                            CMD_REVERSE: "反转"
-                        }
-                        cmd_name = cmd_names.get(cmd, "未知")
-                        print(f"模拟器收到命令: {cmd_name}, 目标速度: {target_speed} rpm")
-                        
-                except Exception as e:
-                    print(f"控制命令解析错误: {str(e)}")
+            # 模拟速度和位置数据
+            speed_ref = 1000 * math.sin(time.time())
+            speed_fed = speed_ref + random.uniform(-50, 50)
+            position = int(1000 * math.sin(time.time() / 2))
             
-            dt = 0.01  # 10ms
-            
-            # 更新相位
-            self.phase += 0.1
-            
-            # 检查是否需要触发故障
-            self.fault_counter += 1
-            if self.fault_counter >= self.fault_interval:
-                self.fault_mode = (self.fault_mode + 1) % 5  # 循环切换故障模式
-                self.fault_counter = 0
-            
-            # 根据故障模式生成数据
-            if self.fault_mode == 0:  # 正常模式
-                ia = 10 * math.sin(self.phase) + random.uniform(-self.current_noise, self.current_noise)
-                ib = 10 * math.sin(self.phase + 2*math.pi/3) + random.uniform(-self.current_noise, self.current_noise)
-                ic = 10 * math.sin(self.phase + 4*math.pi/3) + random.uniform(-self.current_noise, self.current_noise)
-            
-            elif self.fault_mode == 1:  # 过流模式
-                ia = 20 * math.sin(self.phase) + random.uniform(-self.current_noise, self.current_noise)
-                ib = 20 * math.sin(self.phase + 2*math.pi/3) + random.uniform(-self.current_noise, self.current_noise)
-                ic = 20 * math.sin(self.phase + 4*math.pi/3) + random.uniform(-self.current_noise, self.current_noise)
-            
-            elif self.fault_mode == 2:  # 欠流模式
-                ia = 0.05 * math.sin(self.phase) + random.uniform(-self.current_noise, self.current_noise)
-                ib = 0.05 * math.sin(self.phase + 2*math.pi/3) + random.uniform(-self.current_noise, self.current_noise)
-                ic = 0.05 * math.sin(self.phase + 4*math.pi/3) + random.uniform(-self.current_noise, self.current_noise)
-            
-            elif self.fault_mode == 3:  # 超速模式
-                self.speed_actual = 3500 + random.uniform(-self.speed_noise, self.speed_noise)
-                ia = 10 * math.sin(self.phase) + random.uniform(-self.current_noise, self.current_noise)
-                ib = 10 * math.sin(self.phase + 2*math.pi/3) + random.uniform(-self.current_noise, self.current_noise)
-                ic = 10 * math.sin(self.phase + 4*math.pi/3) + random.uniform(-self.current_noise, self.current_noise)
-            
-            else:  # 功率过大模式
-                ia = 15 * math.sin(self.phase) + random.uniform(-self.current_noise, self.current_noise)
-                ib = 15 * math.sin(self.phase + 2*math.pi/3) + random.uniform(-self.current_noise, self.current_noise)
-                ic = 15 * math.sin(self.phase + 4*math.pi/3) + random.uniform(-self.current_noise, self.current_noise)
-            
-            # 速度和位置计算
-            if self.fault_mode != 3:  # 非超速模式下的正常速度计算
-                speed_diff = self.speed_ref - self.speed_actual
-                speed_noise = random.uniform(-self.speed_noise, self.speed_noise)
-                self.speed_actual += speed_diff * 0.1 + speed_noise
-            
-            # 位置计算
-            angular_velocity = self.speed_actual * 360 / 60
-            angle_change = angular_velocity * dt
-            position_noise = random.uniform(-self.position_noise, self.position_noise)
-            self.total_angle += angle_change + position_noise
-            encoder_position = (self.total_angle * 8192 / 360) % 8192
-            
-            # 打包所有数据到一个帧
-            data = [
-                ia, ib, ic,                    # 三相电流
-                self.speed_ref,                # 速度目标值
-                self.speed_actual,             # 实际速度
-                encoder_position               # 位置值
+            # 发送各个数据
+            messages = [
+                (CAN_ID_IA, ia),
+                (CAN_ID_IB, ib),
+                (CAN_ID_IC, ic),
+                (CAN_ID_ID, id),
+                (CAN_ID_IQ, iq),
+                (CAN_ID_SPEED_REF, speed_ref),
+                (CAN_ID_SPEED_FED, speed_fed),
+                (CAN_ID_POSITION, position)
             ]
             
-            msg = VirtualCANMessage(
-                arbitration_id=0x01,  # 使用统一的ID
-                data=data             # 所有数据打包在一起
-            )
-            self.can_bus.send(msg)
+            for msg_id, value in messages:
+                # 创建数据包
+                if msg_id == CAN_ID_POSITION:
+                    # 位置数据使用 short 类型
+                    data = bytearray(8)
+                    struct.pack_into('<h', data, 0, int(value))
+                else:
+                    # 其他数据使用 float 类型
+                    data = bytearray(8)
+                    struct.pack_into('<f', data, 0, float(value))
+                
+                # 创建并发送消息
+                msg = VirtualCANMessage(
+                    arbitration_id=msg_id,
+                    data=data
+                )
+                self.can_bus.send(msg)
             
-            time.sleep(0.01)  # 10ms采样周期 
+            # 控制发送频率
+            time.sleep(0.01)  # 100Hz 

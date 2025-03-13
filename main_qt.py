@@ -6,6 +6,7 @@ import time
 import os
 import math
 import numpy as np
+from can import Message
 
 # 添加字体图标支持
 from PyQt5.QtGui import QFontDatabase, QFont
@@ -13,9 +14,9 @@ from PyQt5.QtGui import QFontDatabase, QFont
 from pyqt5.new_design import Ui_MainWindow
 from utils.constants import *
 from gui.plot_window import PlotWindow
-from can_simulator import VirtualCANMessage, VirtualCANBus, MotorSimulator
+from can_bus import VirtualCANBus, RealCANBus, MotorData
+from can_simulator import MotorSimulator
 from data_logger import DataLogger
-from can_bus import RealCANBus
 from warning_system import WarningSystem
 from warning_dialog import WarningSettingsDialog, WarningHistoryDialog
 from dashboard import PositionDashBoard, SpeedDashBoard, PowerDashBoard, CurrentLineChart
@@ -140,9 +141,8 @@ class MainQtWindow(QtWidgets.QMainWindow):
         # 更新电流信息
         current_info = (f"Ia={data.ia:.1f}A\n"
                        f"Ib={data.ib:.1f}A\n"
-                       f"Ic={data.ic:.1f}A\n"
-                       f"Id={data.id:.1f}A\n"
-                       f"Iq={data.iq:.1f}A")
+                       f"Ic={data.ic:.1f}A\n")
+               
         self.ui.textBrowser_2.setText(current_info)
         
         # 更新电流图表
@@ -157,7 +157,8 @@ class MainQtWindow(QtWidgets.QMainWindow):
         
         # 计算功率
         voltage = 24.0  # 假设电压为24V
-        power = abs(data.speed_fed * 2 * np.pi / 60) * abs(data.iq) * voltage
+        # 使用三相电流计算功率
+        power = voltage * (abs(data.ia) + abs(data.ib) + abs(data.ic))
         self.power_dashboard.update_value(power)
         
     def update_table_data(self):
@@ -251,9 +252,10 @@ class MainQtWindow(QtWidgets.QMainWindow):
 
             if command:
                 # 创建并发送消息
-                msg = VirtualCANMessage(
+                msg = Message(
                     arbitration_id=CAN_ID_CONTROL,
-                    data=command.encode('ascii')  # 将字符串转换为字节数组
+                    data=command.encode('ascii'),  # 将字符串转换为字节数组
+                    is_extended_id=False
                 )
                 self.can_bus.send(msg)
                 

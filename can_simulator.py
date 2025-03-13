@@ -16,8 +16,6 @@ class MotorData:
     ia: float = 0.0
     ib: float = 0.0
     ic: float = 0.0
-    id: float = 0.0
-    iq: float = 0.0
     speed_ref: float = 0.0
     speed_fed: float = 0.0
     position: int = 0
@@ -36,13 +34,6 @@ class VirtualCANMessage:
         self.dlc = dlc
         self.is_extended_id = is_extended_id
         
-        # 根据消息ID进行数据验证
-        if arbitration_id == CAN_ID_CONTROL:
-            if len(data) < 5:  # 至少需要5字节：1字节命令类型 + 4字节浮点数
-                raise ValueError("控制命令数据长度不足")
-        else:
-            if len(data) < 4:  # 其他消息至少需要4字节数据
-                raise ValueError("数据长度不足")
 
 class VirtualCANBus:
     def __init__(self):
@@ -57,8 +48,6 @@ class VirtualCANBus:
             CAN_ID_IA: ('ia', 'f'),        # Ia 电流
             CAN_ID_IB: ('ib', 'f'),        # Ib 电流
             CAN_ID_IC: ('ic', 'f'),        # Ic 电流
-            CAN_ID_ID: ('id', 'f'),        # Id 电流
-            CAN_ID_IQ: ('iq', 'f'),        # Iq 电流
             CAN_ID_SPEED_REF: ('speed_ref', 'f'),  # 速度参考值
             CAN_ID_SPEED_FED: ('speed_fed', 'f'),  # 速度反馈值
             CAN_ID_POSITION: ('position', 'h')      # 位置反馈值
@@ -167,9 +156,6 @@ class MotorSimulator:
             ia = random.uniform(-10, 10)
             ib = random.uniform(-10, 10)
             ic = random.uniform(-10, 10)
-            id = random.uniform(-10, 10)
-            iq = random.uniform(-10, 10)
-            
             # 模拟速度和位置数据
             speed_ref = 1000 * math.sin(time.time())
             speed_fed = speed_ref + random.uniform(-50, 50)
@@ -180,8 +166,6 @@ class MotorSimulator:
                 (CAN_ID_IA, ia),
                 (CAN_ID_IB, ib),
                 (CAN_ID_IC, ic),
-                (CAN_ID_ID, id),
-                (CAN_ID_IQ, iq),
                 (CAN_ID_SPEED_REF, speed_ref),
                 (CAN_ID_SPEED_FED, speed_fed),
                 (CAN_ID_POSITION, position)

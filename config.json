@@ -1,0 +1,7 @@
+{
+    "use_virtual_can": true,
+    "can_settings": {
+        "channel": "can0",
+        "bitrate": 500000
+    }
+} 

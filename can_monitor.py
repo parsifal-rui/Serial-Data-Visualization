@@ -275,7 +275,7 @@ class CANMonitor:
             if not self.data_logger.recording:
                 self.data_logger.start_recording()
                 self.record_btn.config(text="停止记录")
-            else:
+        else:
                 self.data_logger.stop_recording()
                 self.record_btn.config(text="开始记录")
 
@@ -319,7 +319,7 @@ class CANMonitor:
                 arbitration_id=CAN_ID_CONTROL,  # 控制命令ID
                 data=[cmd, 0, 0, 0, 0, 0, 0, 0]  # 命令字节
             )
-            self.bus.send(msg)
+                self.bus.send(msg)
         except Exception as e:
             messagebox.showerror("错误", f"发送失败: {str(e)}")
 

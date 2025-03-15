@@ -15,7 +15,6 @@ from pyqt5.new_design import Ui_MainWindow
 from utils.constants import *
 from gui.plot_window import PlotWindow
 from can_bus import VirtualCANBus, RealCANBus, MotorData
-from can_simulator import MotorSimulator
 from data_logger import DataLogger
 from warning_system import WarningSystem
 from warning_dialog import WarningSettingsDialog, WarningHistoryDialog
@@ -33,12 +32,11 @@ class MainQtWindow(QtWidgets.QMainWindow):
         self.can_bus = can_bus
         self.data_logger = None
         self.plot_window = None
-        self.simulator = None  # 添加模拟器引用
         
         # 设置定时器用于轮询CAN消息
         self.timer = QTimer()
         self.timer.timeout.connect(self.poll_messages)
-        self.timer.start(10)  # 10ms轮询间隔
+        self.timer.start(10)  # 100ms轮询间隔
         
         # 连接信号和槽
         self.connect_signals()
@@ -295,12 +293,9 @@ class MainQtWindow(QtWidgets.QMainWindow):
                             border-radius: 5px;
                         }
                     """)
-                    # 启动数据更新和模拟器
+                    # 启动数据更新
                     self.timer.start()
                     self.update_timer.start()
-                    if not self.simulator:
-                        self.simulator = MotorSimulator(self.can_bus)
-                    self.simulator.start_simulation()
             else:
                 # 断开连接
                 if self.can_bus.disconnect():
@@ -316,11 +311,9 @@ class MainQtWindow(QtWidgets.QMainWindow):
                             border-radius: 5px;
                         }
                     """)
-                    # 停止数据更新和模拟器
+                    # 停止数据更新
                     self.timer.stop()
                     self.update_timer.stop()
-                    if self.simulator:
-                        self.simulator.stop_simulation()
         except Exception as e:
             QtWidgets.QMessageBox.critical(self, "错误", f"连接操作失败: {str(e)}")
 
@@ -520,10 +513,8 @@ def main():
     
     if USE_VIRTUAL_CAN:
         bus = VirtualCANBus()
-        simulator = MotorSimulator(bus)
     else:
         bus = RealCANBus(channel='can0', bitrate=500000)
-        simulator = None  # 真实CAN不需要模拟器
     
     # 创建主窗口
     window = MainQtWindow(bus)

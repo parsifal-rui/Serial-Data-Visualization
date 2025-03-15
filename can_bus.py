@@ -103,6 +103,7 @@ class VirtualCANBus(CANBus):
         self.is_connected = False
         self.simulation_thread = None
         self.running = False
+        self.simulating = False  # 新增：控制是否进行数据模拟
         
         # 模拟参数
         self.target_speed = 0.0
@@ -112,9 +113,10 @@ class VirtualCANBus(CANBus):
         self.last_update = time.time()
         
     def connect(self):
+        """连接虚拟CAN总线并启动模拟器线程"""
         if not self.is_connected:
             self.is_connected = True
-            self.start_simulation()
+            self.start_simulation()  # 只启动线程，不开始模拟
             print("虚拟CAN总线已连接")
             return True
         return False
@@ -136,9 +138,13 @@ class VirtualCANBus(CANBus):
             command = msg.data.decode('ascii').strip()
             
             if command.startswith("MOT ON"):
-                self.start_simulation()
+                self.simulating = True  # 开始模拟数据
+                print("开始模拟数据生成")
             elif command.startswith("MOT OFF"):
-                self.stop_simulation()
+                self.simulating = False  # 停止模拟数据
+                self.target_speed = 0.0
+                self.current_speed = 0.0
+                print("停止模拟数据生成")
             elif command.startswith("ACCE"):
                 self.target_speed = min(3000, self.target_speed + 100)
             elif command.startswith("DECE"):
@@ -168,7 +174,7 @@ class VirtualCANBus(CANBus):
             return None
             
     def start_simulation(self):
-        """启动模拟器"""
+        """启动模拟器线程"""
         if not self.running:
             self.running = True
             self.simulation_thread = threading.Thread(target=self._simulation_loop)
@@ -178,6 +184,7 @@ class VirtualCANBus(CANBus):
     def stop_simulation(self):
         """停止模拟器"""
         self.running = False
+        self.simulating = False
         if self.simulation_thread:
             self.simulation_thread.join()
             
@@ -188,27 +195,51 @@ class VirtualCANBus(CANBus):
             dt = current_time - self.last_update
             self.last_update = current_time
             
-            # 更新速度
-            if self.current_speed < self.target_speed:
-                self.current_speed = min(self.target_speed, 
-                                      self.current_speed + self.acceleration * dt)
-            elif self.current_speed > self.target_speed:
-                self.current_speed = max(self.target_speed, 
-                                      self.current_speed - self.acceleration * dt)
-                                      
-            # 更新位置
-            self.position = (self.position + int(self.current_speed * dt * 8192 / 60)) % 8192
+            if self.simulating:  # 只在simulating为True时更新数据
+                # 更新速度
+                if self.current_speed < self.target_speed:
+                    self.current_speed = min(self.target_speed, 
+                                          self.current_speed + self.acceleration * dt)
+                elif self.current_speed > self.target_speed:
+                    self.current_speed = max(self.target_speed, 
+                                          self.current_speed - self.acceleration * dt)
+                                          
+                # 更新位置
+                self.position = (self.position + int(self.current_speed * dt * 8192 / 60)) % 8192
+                
+                # 生成三相电流
+                freq = self.current_speed * 2 * math.pi / 60  # 转速到角频率
+                t = current_time
+                amplitude = abs(self.current_speed) / 3000 * 10  # 最大电流10A
+                
+                ia = amplitude * math.sin(freq * t)
+                ib = amplitude * math.sin(freq * t + 2 * math.pi / 3)
+                ic = amplitude * math.sin(freq * t + 4 * math.pi / 3)
+            else:
+                # 未模拟状态，所有数据置零
+                ia = ib = ic = 0.0
+                self.current_speed = 0.0
+                
+            # 创建并发送模拟数据消息
+            data_map = {
+                0x100: struct.pack('<f', ia),
+                0x101: struct.pack('<f', ib),
+                0x102: struct.pack('<f', ic),
+                0x103: struct.pack('<f', self.target_speed),
+                0x104: struct.pack('<f', self.current_speed),
+                0x105: struct.pack('<h', self.position) + b'\x00\x00'  # 补齐到4字节
+            }
             
-            # 生成三相电流
-            freq = self.current_speed * 2 * math.pi / 60  # 转速到角频率
-            t = current_time
-            amplitude = abs(self.current_speed) / 3000 * 10  # 最大电流10A
+            # 发送所有数据到队列
+            for addr, data in data_map.items():
+                msg = Message(
+                    arbitration_id=addr,
+                    data=data,
+                    is_extended_id=False
+                )
+                self.queue.put(msg)
             
-            ia = amplitude * math.sin(freq * t)
-            ib = amplitude * math.sin(freq * t + 2 * math.pi / 3)
-            ic = amplitude * math.sin(freq * t + 4 * math.pi / 3)
-            
-            # 更新数据
+            # 更新内部数据（用于直接访问）
             self.update_motor_data(0x100, ia)
             self.update_motor_data(0x101, ib)
             self.update_motor_data(0x102, ic)
